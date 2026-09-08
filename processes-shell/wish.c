@@ -1,5 +1,6 @@
 #include <stdio.h>
-
+#include <stdlib.h>
+#include <string.h>
 /*
 Things to include: 
 - Interactive mode (loop until user types exit)
@@ -28,14 +29,51 @@ Program Error
     write(STDERR_FILENO, error_message, strlen(error_message)); 
 
 */
+//     printf("%s (%d)\n",__FILE__,__LINE__);
 
 const char error_message[30] = "An error has occurred\n";
+//const char *exit_cmd = "exit\n";
 
-int main() {
+int main(int argc, char *argv[]) {
+
+    if(argc == 2){
+        // batch shell    
+        //printf("%s (%d) BATCH \n",__FILE__,__LINE__);
+
+        char* filename = argv[1];
+        printf("%s\n",filename);
+
+        return 0;
+    }
+    else if (argc != 1){
+        // invalid number of arguments
+        exit(1);
+    }
+    //printf("%s (%d) INT \n",__FILE__,__LINE__);
+
+
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read;
 
     int running = 1;
     while(running) {
+        printf("wish> ");
+        read = getline(&line, &len, stdin);
+        if (read != -1){
+            if(line[read - 1] == '\n'){ // remove trailing new line
+                line[read - 1] = '\0';
+                read--;
+            }
 
-        
+            if(strcmp(line, "exit") == 0) running = 0; // user typed exit so we stop
+        }
+        else{ // invalid read
+            printf("%s\n",error_message);
+            //write(STDERR_FILENO, error_message, strlen(error_message)); 
+        }
+
     }
+    free(line);
+    return 0;
 }
