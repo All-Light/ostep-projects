@@ -1,4 +1,5 @@
 CC = gcc
+LD = gcc
 CFLAGS = -O3 -Wall -Werror
 LDFLAGS = 
 RM = /bin/rm -f
@@ -13,4 +14,4 @@ wish.o: wish.c
 
 
 clean:
-	$(RM) $(SORT) $(OBJS)
+	$(RM) $(EXECUTABLE) $(OBJS)
