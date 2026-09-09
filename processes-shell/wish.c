@@ -3,6 +3,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <ctype.h>
+#include <assert.h>
+#include <sys/wait.h>
+
 /*
 Things to include: 
 - Interactive mode (loop until user types exit)
@@ -34,13 +38,12 @@ Program Error
 //     printf("%s (%d)\n",__FILE__,__LINE__);
 
 const char error_message[30] = "An error has occurred\n";
-//const char *exit_cmd = "exit\n";
 
 void clean_string(char* cleaned, char* dirty){
     
     for (char c=*dirty; c; c=*++dirty) {
         //printf("dirty char: %c\n", c);
-        if(c == ' '  || c == '\t'){
+        if(isspace(c)){
             //printf("skipping dirty char: %d\n", c);
         }
         else{
@@ -52,6 +55,24 @@ void clean_string(char* cleaned, char* dirty){
     *cleaned = '\0'; // end cleaned char*
 
 }
+
+void run_command(char** args, int should_wait){
+    int rc = fork();
+    if(rc < 0){
+        write(STDERR_FILENO, error_message, strlen(error_message)); 
+    }
+    else if (rc == 0){
+        //printf("%s\n",args[0]);
+        //printf("%s\n",args[1]);
+
+        execvp(args[0], args);
+    }
+    else if (should_wait == 1){
+        int wc = wait(NULL);
+        assert(wc >= 0);
+    }
+}
+
 
 int handle_command(char* line, size_t len, ssize_t read, FILE* input){
     errno = 0;
@@ -81,16 +102,36 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
         
         char* token;
         char* clean_token = malloc(sizeof(char*));
-        char* delim = " ";
+        char* delim = " ";        
+
+        unsigned int arg_num = 0;
+        unsigned int max_args = 2; // assume max 9 arguments (+1 for executable)
+        char** args = calloc(max_args, sizeof(char*)); 
         token = strsep(&line, delim); // split line 
         while(token != NULL){
-            //printf("token before cleaning: %s\n", token);
-
+            //printf("token before: %s\n", token);
+            //printf("token length: %ld\n", strlen(token));
             clean_string(clean_token, token);
-            printf("token after cleaning: %s\n", token);
-            printf("clean_token: %s\n", clean_token);
-            token = strsep(&line, delim); 
+            if(isspace(*token)|| strlen(token) == 0) {
+                token = strsep(&line, delim);
+                //printf("skipping whitespace\n");  
+            }
+            else{
+                //printf("token after cleaning: %s\n", token);
+                //printf("clean_token: %s\n", clean_token);
+                //printf("arg_num: %d\n", arg_num);
+                
+                args[arg_num] = strdup(clean_token);
+                arg_num++;
+                if(arg_num > max_args){
+                    max_args *= 2; // double our args container size
+                    args = realloc(args, max_args*sizeof(char*));
+                }
+                token = strsep(&line, delim); 
+            }
         }
+        run_command(args, 1);
+        free(args);
     }
     return 1; // success
 }
