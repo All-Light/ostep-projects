@@ -34,6 +34,9 @@ Program Error
  - Only one program error 
     write(STDERR_FILENO, error_message, strlen(error_message)); 
 
+// BUGS:
+ - The echo command is buggy: echo "hi" works but echo "hi this is a test" gives invalid realloc size
+
 */
 //     printf("%s (%d)\n",__FILE__,__LINE__);
 
@@ -80,6 +83,7 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
         if (errno == ENOMEM){
             // OUT OF MEMORY
             write(STDERR_FILENO, error_message, strlen(error_message)); 
+            
         }
         else if (feof(input)){
             // end of file EOF reached
@@ -151,8 +155,17 @@ int main(int argc, char *argv[]) {
         //printf("%s (%d) BATCH \n",__FILE__,__LINE__);
 
         char* filename = argv[1];
-        printf("%s\n",filename);
+        FILE* input_file = fopen(filename, "r");
+        
+        char *line = NULL;
+        size_t len = 0;
+        ssize_t read = 0;
 
+        int running = 1;
+        while(running) {
+            running = handle_command(line, len, read, input_file);
+        }
+        free(line);
         return 0;
     }
     else if (argc != 1){
@@ -170,7 +183,6 @@ int main(int argc, char *argv[]) {
     while(running) {
         printf("wish> ");
         running = handle_command(line, len, read, stdin);
-
     }
     free(line);
     return 0;
