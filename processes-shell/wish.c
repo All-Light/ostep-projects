@@ -36,11 +36,42 @@ Program Error
 
 // BUGS:
  - The echo command is buggy: echo "hi" works but echo "hi this is a test" gives invalid realloc size
-
+ - path should OVERWRITE the old paths
 */
 //     printf("%s (%d)\n",__FILE__,__LINE__);
 
 const char error_message[30] = "An error has occurred\n";
+
+typedef struct
+{
+    char** paths;
+    unsigned char nr_paths;
+    unsigned char longest_path;
+} paths_data;
+
+int which_path(char** restrict resulting_path_ptr, char* restrict command, paths_data* restrict paths_struct){
+    int i;
+    for(i = 0; i < paths_struct->nr_paths; i++){
+        printf("i=%d\n",i);
+        int max_size = (strlen(paths_struct->paths[i]) + strlen(command) + 1) * sizeof(char);
+        char* candidate_path = (char*) malloc(max_size);
+
+        printf("path: %s\n",paths_struct->paths[i]);
+        printf("command: %s\n",command);
+        // copy in the concatenated candidate path into candidate_path
+        snprintf(candidate_path, max_size, "%s%s",paths_struct->paths[i], command);
+        //strcat(candidate_path, paths_struct->paths[i]);
+        //strcat(candidate_path, command);
+        printf("candidate path: %s\n", candidate_path);
+        if(access(candidate_path, X_OK) == 0) {
+            printf("SUCCESS! candidate path ptr: %p\n", &candidate_path);
+            *resulting_path_ptr = candidate_path;
+            return 0;
+        }
+        free(candidate_path);
+    }
+    return 1;
+}
 
 // Updates cleaned to be a copy of dirty without any isspace characters
 void clean_string(char* cleaned, char* dirty){
@@ -60,23 +91,38 @@ void clean_string(char* cleaned, char* dirty){
 
 }
 
-void run_command(char** args, int should_wait){
+void run_command(char** args, paths_data* paths_struct, int should_wait){
+    // allocate stack pointer for longest possible path
+    char* command_path = (char*) malloc(1000*sizeof(char)); //FIXME: We shouldnt need to use this large of a buffer 
+    command_path = NULL;
+    int path_found = which_path(&command_path, args[0], paths_struct);
+    //printf("is path found? %d\n", path_found);
+    if (command_path == NULL){ printf("POINTER IS STILL NULL\n"); return;}
+    if(path_found != 0){
+        write(STDERR_FILENO, error_message, strlen(error_message)); 
+        free(command_path);
+        return; // not found in path
+    }
+    printf("command_path: %p\n",command_path);
+
+
     int rc = fork();
     if(rc < 0){
         // fork was unsuccessful
         write(STDERR_FILENO, error_message, strlen(error_message)); 
     }
     else if (rc == 0){
-        execvp(args[0], args);
+        execvp(command_path, args);
     }
     else if (should_wait == 1){
         int wc = wait(NULL);
         assert(wc >= 0);
     }
+    free(command_path);
 }
 
 
-int handle_command(char* line, size_t len, ssize_t read, FILE* input){
+int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data* paths_struct){
     errno = 0;
     read = getline(&line, &len, input);
     if (read == -1){ 
@@ -87,7 +133,7 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
         }
         else if (feof(input)){
             // end of file EOF reached
-            return 0; // exit
+            return 0;
         }
         else{
             // Could not read input
@@ -102,7 +148,10 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
         }
 
         char* token;
-        char* clean_token = malloc(sizeof(char*));
+        char* clean_token = malloc(sizeof(char));
+        if(clean_token == NULL){
+            fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        }
         char* delim = " ";        
 
         unsigned int arg_num = 0;
@@ -111,7 +160,6 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
         token = strsep(&line, delim); // split line 
         while(token != NULL){
             clean_string(clean_token, token); // clean string 
-            if(strcmp(clean_token, "exit") == 0) return 0;// user typed exit so we stop
 
             if(isspace(*token) || strlen(token) == 0) {
                 token = strsep(&line, delim); // skip space-only or empty tokens
@@ -124,8 +172,24 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
                 if(arg_num > max_args){
                     max_args += 1; // add 1 to our container size
                     args = realloc(args, max_args*sizeof(char*));
+                    if(args == NULL){
+                        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+                    }
                 }
                 token = strsep(&line, delim); 
+            }
+        }
+        free(clean_token);
+        if(args[0] == NULL){
+            fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        }
+        if(strcmp(args[0], "exit") == 0){
+            if(arg_num != 1){ // invalid number of arguments
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+            }
+            else{
+                free(args);
+                return 0;
             }
         }
         if(strcmp(args[0], "cd") == 0){
@@ -137,9 +201,29 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
                 chdir(args[1]);
             }
         }
+        else if(strcmp(args[0], "path") == 0){// add args to path
+
+            // update our paths struct to hold arg_num-1 more pointers
+            int prev_nr_paths = paths_struct->nr_paths;
+            paths_struct->paths = realloc(paths_struct->paths, sizeof((paths_struct->nr_paths+arg_num-1)*sizeof(char*)));
+            if(paths_struct->paths == NULL){
+                fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+            }
+            
+            paths_struct->nr_paths += arg_num-1; // -1 to remove the actual "path" argument (args[0])
+
+            int i;
+            for(i = 1; i < arg_num; i++){
+                paths_struct->paths[prev_nr_paths+i-1] = args[i];
+                printf("adding path: %s\n", args[i]);
+                if(strlen(args[i])> paths_struct->longest_path){
+                    paths_struct->longest_path = strlen(args[i]);
+                }
+            }
+        }
         else{
             // Our command is assumed to be a binary 
-            run_command(args, 1);
+            run_command(args, paths_struct, 1);
         }
         free(args);
         args = NULL;
@@ -150,9 +234,9 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
 //printf("%s (%d) INT \n",__FILE__,__LINE__);
 int main(int argc, char *argv[]) {
     FILE* input_file = stdin; // assume interactive mode
-    char* filename;
+    char* filename = NULL;
     if(argc == 2){
-        // batch shell     
+        // batch shell - overwrite input_file
         filename = argv[1];
         input_file = fopen(filename, "r"); 
     }
@@ -165,12 +249,27 @@ int main(int argc, char *argv[]) {
     size_t len = 0;
     ssize_t read = 0;
 
+    // set up default path
+    paths_data* paths_struct = malloc(sizeof(paths_data));
+    if(paths_struct == NULL){
+        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+    }
+    paths_struct->paths = malloc(sizeof(char*));
+    if(paths_struct->paths == NULL){
+        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+    }
+    paths_struct->paths[0] = "/bin/";
+    paths_struct->longest_path = strlen(paths_struct->paths[0]);
+    paths_struct->nr_paths = 1;
+
     int running = 1;
     while(running) {
         if(argc!=2) printf("wish> ");
-        running = handle_command(line, len, read, input_file);
+        running = handle_command(line, len, read, input_file, paths_struct);
     }
     free(line);
+    free(paths_struct->paths);
+    free(paths_struct);
     if(argc == 2){
         fclose(input_file);
     }
