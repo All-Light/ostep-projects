@@ -147,33 +147,19 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
     return 1; // success
 }
 
-
+//printf("%s (%d) INT \n",__FILE__,__LINE__);
 int main(int argc, char *argv[]) {
-
+    FILE* input_file = stdin; // assume interactive mode
+    char* filename;
     if(argc == 2){
         // batch shell     
-        //printf("%s (%d) BATCH \n",__FILE__,__LINE__);
-
-        char* filename = argv[1];
-        FILE* input_file = fopen(filename, "r");
-        
-        char *line = NULL;
-        size_t len = 0;
-        ssize_t read = 0;
-
-        int running = 1;
-        while(running) {
-            running = handle_command(line, len, read, input_file);
-        }
-        free(line);
-        return 0;
+        filename = argv[1];
+        input_file = fopen(filename, "r"); 
     }
     else if (argc != 1){
         // invalid number of arguments
         exit(1);
     }
-    //printf("%s (%d) INT \n",__FILE__,__LINE__);
-
 
     char *line = NULL;
     size_t len = 0;
@@ -181,9 +167,12 @@ int main(int argc, char *argv[]) {
 
     int running = 1;
     while(running) {
-        printf("wish> ");
-        running = handle_command(line, len, read, stdin);
+        if(argc!=2) printf("wish> ");
+        running = handle_command(line, len, read, input_file);
     }
     free(line);
+    if(argc == 2){
+        fclose(input_file);
+    }
     return 0;
 }

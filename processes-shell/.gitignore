@@ -2,3 +2,4 @@ wish
 *.o
 tmp/*
 vgcore.*
+tests-out/
