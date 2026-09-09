@@ -39,6 +39,7 @@ Program Error
 
 const char error_message[30] = "An error has occurred\n";
 
+// Updates cleaned to be a copy of dirty without any isspace characters
 void clean_string(char* cleaned, char* dirty){
     
     for (char c=*dirty; c; c=*++dirty) {
@@ -59,12 +60,10 @@ void clean_string(char* cleaned, char* dirty){
 void run_command(char** args, int should_wait){
     int rc = fork();
     if(rc < 0){
+        // fork was unsuccessful
         write(STDERR_FILENO, error_message, strlen(error_message)); 
     }
     else if (rc == 0){
-        //printf("%s\n",args[0]);
-        //printf("%s\n",args[1]);
-
         execvp(args[0], args);
     }
     else if (should_wait == 1){
@@ -97,11 +96,7 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
             line[read - 1] = '\0';
             read--;
         }
-        // built-in commands:
-        if(strcmp(line, "exit") == 0) return 0; // user typed exit so we stop
-        
 
-        // executables:
         char* token;
         char* clean_token = malloc(sizeof(char*));
         char* delim = " ";        
@@ -111,29 +106,39 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
         char** args = calloc(max_args, sizeof(char*)); 
         token = strsep(&line, delim); // split line 
         while(token != NULL){
-            //printf("token before: %s\n", token);
-            //printf("token length: %ld\n", strlen(token));
-            clean_string(clean_token, token);
-            if(isspace(*token)|| strlen(token) == 0) {
-                token = strsep(&line, delim);
-                //printf("skipping whitespace\n");  
+            clean_string(clean_token, token); // clean string 
+            if(strcmp(clean_token, "exit") == 0) return 0;// user typed exit so we stop
+
+            if(isspace(*token) || strlen(token) == 0) {
+                token = strsep(&line, delim); // skip space-only or empty tokens
             }
             else{
-                //printf("token after cleaning: %s\n", token);
-                //printf("clean_token: %s\n", clean_token);
-                //printf("arg_num: %d\n", arg_num);
-                
+                // Update our arguments with the new clean token
                 args[arg_num] = strdup(clean_token);
                 arg_num++;
+                // If our number of arguments exceeds max_args we realloc the argument container
                 if(arg_num > max_args){
-                    max_args *= 2; // double our args container size
+                    max_args += 1; // add 1 to our container size
                     args = realloc(args, max_args*sizeof(char*));
                 }
                 token = strsep(&line, delim); 
             }
         }
-        run_command(args, 1);
+        if(strcmp(args[0], "cd") == 0){
+            if(arg_num != 2){ // we want exactly one argument after cd
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+            }
+            else{
+                // we have exactly one argument, the path to move to
+                chdir(args[1]);
+            }
+        }
+        else{
+            // Our command is assumed to be a binary 
+            run_command(args, 1);
+        }
         free(args);
+        args = NULL;
     }
     return 1; // success
 }
