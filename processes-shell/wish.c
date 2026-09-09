@@ -97,15 +97,17 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input){
             line[read - 1] = '\0';
             read--;
         }
-
+        // built-in commands:
         if(strcmp(line, "exit") == 0) return 0; // user typed exit so we stop
         
+
+        // executables:
         char* token;
         char* clean_token = malloc(sizeof(char*));
         char* delim = " ";        
 
         unsigned int arg_num = 0;
-        unsigned int max_args = 2; // assume max 9 arguments (+1 for executable)
+        unsigned int max_args = 2; // assume max 1 arguments (+1 for executable)
         char** args = calloc(max_args, sizeof(char*)); 
         token = strsep(&line, delim); // split line 
         while(token != NULL){
