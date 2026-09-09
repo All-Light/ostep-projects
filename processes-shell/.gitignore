@@ -1,3 +1,4 @@
 wish
 *.o
 tmp/*
+vgcore.*

@@ -1,6 +1,6 @@
 CC = gcc
 LD = gcc
-CFLAGS = -O3 -Wall -Werror
+CFLAGS = -g -Wall -Werror #-O3 
 LDFLAGS = 
 RM = /bin/rm -f
 OBJS = wish.o

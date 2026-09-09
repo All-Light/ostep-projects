@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <errno.h>
 /*
 Things to include: 
 - Interactive mode (loop until user types exit)
@@ -36,33 +36,70 @@ Program Error
 const char error_message[30] = "An error has occurred\n";
 //const char *exit_cmd = "exit\n";
 
+void clean_string(char* cleaned, char* dirty){
+    
+    for (char c=*dirty; c; c=*++dirty) {
+        //printf("dirty char: %c\n", c);
+        if(c == ' '  || c == '\t'){
+            //printf("skipping dirty char: %d\n", c);
+        }
+        else{
+            *cleaned = c;
+            //printf("clean char: %c\n",  *cleaned);
+            ++cleaned;
+        }
+    }
+    *cleaned = '\0'; // end cleaned char*
+
+}
+
 int handle_command(char* line, size_t len, ssize_t read, FILE* input){
+    errno = 0;
     read = getline(&line, &len, input);
-    if (read != -1){
+    if (read == -1){ 
+        if (errno == ENOMEM){
+            // OUT OF MEMORY
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+        }
+        else if (feof(input)){
+            // end of file EOF reached
+            return 0; // exit
+        }
+        else{
+            // Could not read input
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+        }
+    }
+    else{
+        // Successfully read line
         if(line[read - 1] == '\n'){ // remove trailing new line
             line[read - 1] = '\0';
             read--;
         }
 
         if(strcmp(line, "exit") == 0) return 0; // user typed exit so we stop
-        // split line 
-        if(strcmp(line, "cd")) {
+        
+        char* token;
+        char* clean_token = malloc(sizeof(char*));
+        char* delim = " ";
+        token = strsep(&line, delim); // split line 
+        while(token != NULL){
+            //printf("token before cleaning: %s\n", token);
 
+            clean_string(clean_token, token);
+            printf("token after cleaning: %s\n", token);
+            printf("clean_token: %s\n", clean_token);
+            token = strsep(&line, delim); 
         }
     }
-    else{ // invalid read
-        printf("%s\n",error_message);
-        //write(STDERR_FILENO, error_message, strlen(error_message)); 
-    }
-    return 1;
-
+    return 1; // success
 }
 
 
 int main(int argc, char *argv[]) {
 
     if(argc == 2){
-        // batch shell    
+        // batch shell     
         //printf("%s (%d) BATCH \n",__FILE__,__LINE__);
 
         char* filename = argv[1];
@@ -79,7 +116,7 @@ int main(int argc, char *argv[]) {
 
     char *line = NULL;
     size_t len = 0;
-    ssize_t read;
+    ssize_t read = 0;
 
     int running = 1;
     while(running) {
