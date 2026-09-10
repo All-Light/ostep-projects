@@ -5,10 +5,10 @@
 #include <errno.h>
 #include <ctype.h>
 #include <assert.h>
+#include <fcntl.h>
 #include <sys/wait.h>
 
 #define DEBUG 0
-
 
 /*
 Things to include: 
@@ -40,7 +40,18 @@ Program Error
 // BUGS:
  - The echo command is buggy: echo "hi" works but echo "hi this is a test" gives invalid realloc size
  - Magic numbers for string buffers!
- - Redirection not implemented
+ - Redirection not kinda working (> is not parsed from none-spaced words)
+
+
+How to implement redirection (and later pipes):
+    1. We read each line normally,
+    2. Go token by token 
+    3. if we encounter ">" we set redirect_flag = 1;
+    4. when handling command and redirect_flag == 1
+        - Read argument-by-argument until we find ">"
+        - get the next argument as output file 
+        - remove output file and ">" from arguments
+        - run command as normal
  */
 //     printf("%s (%d)\n",__FILE__,__LINE__);
 
@@ -52,6 +63,13 @@ typedef struct
     unsigned char nr_paths;
     unsigned char longest_path;
 } paths_data;
+
+//typedef struct 
+//{
+//    char** args;
+//    unsigned char nr_args;
+//} command;
+
 
 int which_path(char** restrict resulting_path_ptr, char* restrict command, paths_data* restrict paths_struct){
     if(DEBUG) printf("Number of available paths: %d\n", paths_struct->nr_paths);
@@ -76,7 +94,7 @@ int which_path(char** restrict resulting_path_ptr, char* restrict command, paths
 }
 
 void fix_path(char** path){ // pass-by-reference
-    //if(DEBUG) printf("path pointer %p\n",path);
+    if(DEBUG) printf("path pointer %p\n",path);
 
     int length = strlen(*path);
     //if(DEBUG) printf("path str length: %d\n", length);
@@ -109,7 +127,7 @@ void clean_string(char* cleaned, char* dirty){
 
 }
 
-void run_command(char** args, paths_data* paths_struct, int should_wait){
+void run_command(char** args, paths_data* paths_struct, int nr_args, int should_wait){
     // allocate stack pointer for longest possible path
     char* command_path = (char*) malloc(1000*sizeof(char)); //FIXME: We shouldnt need to use this large of a buffer 
     command_path = NULL;
@@ -135,6 +153,32 @@ void run_command(char** args, paths_data* paths_struct, int should_wait){
         write(STDERR_FILENO, error_message, strlen(error_message)); 
     }
     else if (rc == 0){
+        // check for redirection:
+        for(int arg_nr = 0; arg_nr < nr_args; arg_nr++){
+            if(DEBUG) printf("arg:%s\n", args[arg_nr]);
+            if(DEBUG) printf("arg+1:%s\n", args[arg_nr+1]);
+            if (strlen(args[arg_nr]) == 1 && args[arg_nr][0] == '>'){
+                if(DEBUG) printf("redirection caught!\n");
+                if(DEBUG) printf("nr_args: %d\n", nr_args);
+                if(DEBUG) printf("arg_nr: %d\n", arg_nr);
+                if (nr_args - arg_nr != 2){ 
+                    // multiple output files or no output file
+                    write(STDERR_FILENO, error_message, strlen(error_message)); 
+                    free(command_path);
+                    return;
+                }
+                // args[arg_nr+1] must be file nmae 
+                int fd = open(args[arg_nr+1], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+                dup2(fd, 1); // redirect stdout
+                dup2(fd, 2); // redirect stderr
+                close(fd); // no need to keep open
+                // remove these args from actual executable
+                args[arg_nr] = NULL;
+                args[arg_nr+1] = NULL;
+                break;
+            }
+        }
+
         execvp(command_path, args);
     }
     else if (should_wait == 1){
@@ -143,7 +187,6 @@ void run_command(char** args, paths_data* paths_struct, int should_wait){
     }
     free(command_path);
 }
-
 
 int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data* paths_struct){
     errno = 0;
@@ -178,8 +221,8 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
         char* delim = " ";        
 
         unsigned int arg_num = 0;
-        unsigned int max_args = 2; // assume max 1 arguments (+1 for executable)
-        char** args = calloc(max_args, sizeof(char*)); 
+        unsigned int max_args = 100; // assume max 1 arguments (+1 for executable)
+        char** args = calloc(1000, sizeof(char*)); 
         if(args == NULL){
             fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
         }
@@ -197,7 +240,8 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
                 // If our number of arguments exceeds max_args we realloc the argument container
                 if(arg_num > max_args){
                     max_args += 1; // add 1 to our container size
-                    args = realloc(args, max_args*sizeof(char*));
+                    printf("reallocating args size\n");
+                    args = (char**)realloc(args, max_args*sizeof(char*));
                     if(args == NULL){
                         fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
                     }
@@ -259,7 +303,7 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
         }
         else{
             // Our command is assumed to be a binary 
-            run_command(args, paths_struct, 1);
+            run_command(args, paths_struct, arg_num , 1);
         }
         free(args);
         args = NULL;
