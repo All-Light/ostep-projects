@@ -7,7 +7,7 @@
 #include <assert.h>
 #include <sys/wait.h>
 
-#define DEBUG 0
+#define DEBUG 1
 
 
 /*
@@ -40,6 +40,7 @@ Program Error
 // BUGS:
  - The echo command is buggy: echo "hi" works but echo "hi this is a test" gives invalid realloc size
  - Magic numbers for string buffers!
+ - "/" are not appended to user's paths
  */
 //     printf("%s (%d)\n",__FILE__,__LINE__);
 
@@ -100,6 +101,7 @@ void run_command(char** args, paths_data* paths_struct, int should_wait){
     //printf("is path found? %d\n", path_found);
     if (command_path == NULL){ 
         if(DEBUG) printf("POINTER IS STILL NULL LINE=%d\n", __LINE__); 
+        write(STDERR_FILENO, error_message, strlen(error_message)); 
         return;
     }
     if(path_found != 0){
@@ -188,9 +190,9 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
         }
         free(clean_token);
         if(args[0] == NULL){
-            fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+            if(DEBUG) fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
         }
-        if(strcmp(args[0], "exit") == 0){
+        else if(strcmp(args[0], "exit") == 0){
             if(arg_num != 1){ // invalid number of arguments
                 write(STDERR_FILENO, error_message, strlen(error_message)); 
             }
@@ -199,7 +201,7 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
                 return 0;
             }
         }
-        if(strcmp(args[0], "cd") == 0){
+        else if(strcmp(args[0], "cd") == 0){
             if(arg_num != 2){ // we want exactly one argument after cd
                 write(STDERR_FILENO, error_message, strlen(error_message)); 
             }
