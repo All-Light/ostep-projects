@@ -7,7 +7,7 @@
 #include <assert.h>
 #include <sys/wait.h>
 
-#define DEBUG 1
+#define DEBUG 0
 
 
 /*
@@ -40,7 +40,7 @@ Program Error
 // BUGS:
  - The echo command is buggy: echo "hi" works but echo "hi this is a test" gives invalid realloc size
  - Magic numbers for string buffers!
- - "/" are not appended to user's paths
+ - Redirection not implemented
  */
 //     printf("%s (%d)\n",__FILE__,__LINE__);
 
@@ -75,6 +75,22 @@ int which_path(char** restrict resulting_path_ptr, char* restrict command, paths
     return 1;
 }
 
+void fix_path(char** path){ // pass-by-reference
+    //if(DEBUG) printf("path pointer %p\n",path);
+
+    int length = strlen(*path);
+    //if(DEBUG) printf("path str length: %d\n", length);
+    //if(DEBUG) printf("path str size: %ld\n bytes", sizeof(*path));
+    //if(DEBUG) printf("path str: %s\n", *path);
+    //if(DEBUG) printf("path str last %c\n", (*path)[length-1]);
+    if((*path)[length-1] != '/'){
+        // realloc if our buffer is too small
+        (*path) = (char*) realloc((*path), (length+1)*sizeof(char));
+        (*path)[length] = '/'; // append trailing slash
+        (*path)[length+1] = '\0'; // string terminator
+    }
+}
+
 // Updates cleaned to be a copy of dirty without any isspace characters
 void clean_string(char* cleaned, char* dirty){
     
@@ -102,6 +118,7 @@ void run_command(char** args, paths_data* paths_struct, int should_wait){
     if (command_path == NULL){ 
         if(DEBUG) printf("POINTER IS STILL NULL LINE=%d\n", __LINE__); 
         write(STDERR_FILENO, error_message, strlen(error_message)); 
+        free(command_path);
         return;
     }
     if(path_found != 0){
@@ -228,9 +245,11 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
             }
             
             paths_struct->nr_paths += arg_num-1; // -1 to remove the actual "path" argument (args[0])
+            
 
             int i;
             for(i = 1; i < arg_num; i++){
+                fix_path(&args[i]);
                 paths_struct->paths[i-1] = args[i];
                 if(DEBUG) printf("adding path: %s\n", args[i]);
                 if(strlen(args[i])> paths_struct->longest_path){
