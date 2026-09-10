@@ -1,3 +1,7 @@
 ls
 echo "Thisisatest!"
+pwd
+path 
 ls
+path /bin/
+echo "working!"
