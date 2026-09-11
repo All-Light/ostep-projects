@@ -60,28 +60,37 @@ const char error_message[30] = "An error has occurred\n";
 typedef struct
 {
     char** paths;
-    unsigned char nr_paths;
-    unsigned char longest_path;
+    size_t nr_paths;
+    size_t longest_path;
 } paths_data;
 
-//typedef struct 
-//{
-//    char** args;
-//    unsigned char nr_args;
-//} command;
+typedef struct 
+{
+    char** args;
+    size_t num_args;
+    char* output_file;
+} Command;
+
+typedef struct
+{
+    Command* command_arr; // pointer to command array
+    size_t size; // nr slots filled
+    size_t capacity; // total allocated slots
+} CommandsArr;
 
 
-int which_path(char** restrict resulting_path_ptr, char* restrict command, paths_data* restrict paths_struct){
-    if(DEBUG) printf("Number of available paths: %d\n", paths_struct->nr_paths);
-    int i;
-    for(i = 0; i < paths_struct->nr_paths; i++){
-        int max_size = (strlen(paths_struct->paths[i]) + strlen(command) + 1) * sizeof(char);
+int which_path(char** restrict resulting_path_ptr, char* restrict executable, paths_data** restrict paths_struct){
+    if(DEBUG) printf("Number of available paths: %ld\n", (*paths_struct)->nr_paths);
+    for(int i = 0; i < (*paths_struct)->nr_paths; i++){
+        if(DEBUG) printf("i: %d\n",i);
+        if(DEBUG) printf("path: %s\n",(*paths_struct)->paths[i]);
+
+        int max_size = (strlen((*paths_struct)->paths[i]) + strlen(executable) + 1) * sizeof(char);
         char* candidate_path = (char*) malloc(max_size);
 
-        if(DEBUG) printf("path: %s\n",paths_struct->paths[i]);
-        if(DEBUG) printf("command: %s\n",command);
+        if(DEBUG) printf("executable: %s\n",executable);
         // copy in the candidate path into candidate_path
-        snprintf(candidate_path, max_size, "%s%s",paths_struct->paths[i], command);
+        snprintf(candidate_path, max_size, "%s%s",(*paths_struct)->paths[i], executable);
         if(DEBUG) printf("candidate path: %s\n", candidate_path);
         if(access(candidate_path, X_OK) == 0) {
             if(DEBUG) printf("SUCCESS! candidate path ptr: %p\n", &candidate_path);
@@ -97,41 +106,104 @@ void fix_path(char** path){ // pass-by-reference
     if(DEBUG) printf("path pointer %p\n",path);
 
     int length = strlen(*path);
-    //if(DEBUG) printf("path str length: %d\n", length);
-    //if(DEBUG) printf("path str size: %ld\n bytes", sizeof(*path));
-    //if(DEBUG) printf("path str: %s\n", *path);
-    //if(DEBUG) printf("path str last %c\n", (*path)[length-1]);
+    if(DEBUG) printf("path str length: %d\n", length);
+    if(DEBUG) printf("path str size: %ld\n bytes", sizeof(*path));
+    if(DEBUG) printf("path str: %s\n", *path);
+    if(DEBUG) printf("path str last %c\n", (*path)[length-1]);
+    // If path does not end in "/" we append it
     if((*path)[length-1] != '/'){
         // realloc if our buffer is too small
         (*path) = (char*) realloc((*path), (length+1)*sizeof(char));
         (*path)[length] = '/'; // append trailing slash
         (*path)[length+1] = '\0'; // string terminator
+        if(DEBUG) printf("Appended trailing slash\n");
     }
 }
 
 // Updates cleaned to be a copy of dirty without any isspace characters
 void clean_string(char* cleaned, char* dirty){
-    
     for (char c=*dirty; c; c=*++dirty) {
         //printf("dirty char: %c\n", c);
-        if(isspace(c)){
-            //printf("skipping dirty char: %d\n", c);
-        }
-        else{
+        if(!isspace(c)){
             *cleaned = c;
             //printf("clean char: %c\n",  *cleaned);
             ++cleaned;
         }
     }
     *cleaned = '\0'; // end cleaned char*
-
 }
 
-void run_command(char** args, paths_data* paths_struct, int nr_args, int should_wait){
+
+// takes in a line and returns an array of commands 
+CommandsArr* parse_line(char* line, unsigned int line_size){
+    // a line is a long string
+    //  we split by whitespace and set them either as executable, argument, redirect, or pipe.
+
+    char* token;
+    char* clean_token = malloc(100*sizeof(char)+1);
+    if(clean_token == NULL){
+        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+    }
+    char* delim = " ";        
+
+    // assume a max of 1 command for now
+    int max_commands = 1;
+    CommandsArr* commands = calloc(max_commands, sizeof(CommandsArr)); // allocate 1 command array
+    if(commands == NULL){
+        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+    }
+
+    unsigned int command_num = 0; // number of current command
+    unsigned int arg_num = 0; // number of current argument
+
+    commands->command_arr = calloc(command_num, sizeof(Command)); // allocate 1 command
+    if(commands->command_arr == NULL){
+        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+    }
+    commands->size = 1; // current nr of commands 
+    commands->capacity = 1;
+
+    commands->command_arr[command_num].args = calloc(arg_num, sizeof(char*)); // allocate args array
+    if(commands->command_arr[command_num].args == NULL){
+        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+    }
+
+    token = strsep(&line, delim); // split line 
+    while(token != NULL){
+        clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
+
+        if(isspace(*clean_token) || strlen(clean_token) == 0 || clean_token == NULL) { // if the entire token is empty
+            token = strsep(&line, delim); // skip space-only or empty tokens
+            continue;
+        }
+        commands->command_arr[command_num].args[arg_num] = strdup(clean_token);
+        arg_num++;
+
+        // TODO: implement piping and redirects here
+        token = strsep(&line, delim); 
+    }
+    commands->command_arr->num_args = arg_num-1; // remove executable from num args
+
+    return commands;
+}
+
+void free_commandsArr(CommandsArr* commands){
+    for(size_t command_num = 0; command_num < commands->size; command_num++){
+        for(int i = 0; i < commands->command_arr[command_num].num_args; i++){
+            free(commands->command_arr[command_num].args[i]);
+        }
+        free(commands->command_arr[command_num].args);
+    }
+    free(commands->command_arr);
+    free(commands);
+}
+
+
+void run_command(char* executable, char** args, paths_data** paths_struct, int nr_args, int should_wait){
     // allocate stack pointer for longest possible path
     char* command_path = (char*) malloc(1000*sizeof(char)); //FIXME: We shouldnt need to use this large of a buffer 
     command_path = NULL;
-    int path_found = which_path(&command_path, args[0], paths_struct);
+    int path_found = which_path(&command_path, executable, paths_struct);
     //printf("is path found? %d\n", path_found);
     if (command_path == NULL){ 
         if(DEBUG) printf("POINTER IS STILL NULL LINE=%d\n", __LINE__); 
@@ -144,7 +216,7 @@ void run_command(char** args, paths_data* paths_struct, int nr_args, int should_
         free(command_path);
         return; // not found in path
     }
-    if(DEBUG) printf("command_path: %p\n",command_path);
+    if(DEBUG) printf("command_path pointer: %p\n",command_path);
 
 
     int rc = fork();
@@ -161,7 +233,7 @@ void run_command(char** args, paths_data* paths_struct, int nr_args, int should_
                 if(DEBUG) printf("redirection caught!\n");
                 if(DEBUG) printf("nr_args: %d\n", nr_args);
                 if(DEBUG) printf("arg_nr: %d\n", arg_nr);
-                if (nr_args - arg_nr != 2){ 
+                if (nr_args - arg_nr != 1){ 
                     // multiple output files or no output file
                     write(STDERR_FILENO, error_message, strlen(error_message)); 
                     free(command_path);
@@ -188,7 +260,7 @@ void run_command(char** args, paths_data* paths_struct, int nr_args, int should_
     free(command_path);
 }
 
-int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data* paths_struct){
+int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data** paths_struct){
     errno = 0;
     read = getline(&line, &len, input);
     if (read == -1){ 
@@ -212,101 +284,73 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
             line[read - 1] = '\0';
             read--;
         }
+        
+        CommandsArr* commands = parse_line(line, len);
+        
+        for(size_t command_num = 0; command_num < commands->size; command_num++){
+            char* executable = commands->command_arr[command_num].args[0];
+            char** args = commands->command_arr[command_num].args;
+            unsigned int num_args = commands->command_arr[command_num].num_args;
 
-        char* token;
-        char* clean_token = malloc(100*sizeof(char*)+1);
-        if(clean_token == NULL){
-            fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
-        }
-        char* delim = " ";        
-
-        unsigned int arg_num = 0;
-        unsigned int max_args = 100; // assume max 1 arguments (+1 for executable)
-        char** args = calloc(1000, sizeof(char*)); 
-        if(args == NULL){
-            fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
-        }
-        token = strsep(&line, delim); // split line 
-        while(token != NULL){
-            clean_string(clean_token, token); // clean string 
-
-            if(isspace(*token) || strlen(token) == 0) {
-                token = strsep(&line, delim); // skip space-only or empty tokens
+            if(strcmp(executable, "exit") == 0){
+                if(num_args != 0){ // invalid number of arguments
+                    write(STDERR_FILENO, error_message, strlen(error_message)); 
+                }
+                else{
+                    free_commandsArr(commands);
+                    return 0;
+                }
             }
-            else{
-                // Update our arguments with the new clean token
-                args[arg_num] = strdup(clean_token);
-                arg_num++;
-                // If our number of arguments exceeds max_args we realloc the argument container
-                if(arg_num > max_args){
-                    max_args += 1; // add 1 to our container size
-                    printf("reallocating args size\n");
-                    args = (char**)realloc(args, max_args*sizeof(char*));
-                    if(args == NULL){
-                        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+            else if(strcmp(executable, "cd") == 0){
+                if(num_args != 1){ // we want exactly one argument after cd
+                    write(STDERR_FILENO, error_message, strlen(error_message)); 
+                }
+                else{
+                    // we have exactly one argument, the path to move to
+                    chdir(args[1]);
+                }
+            }
+            else if(strcmp(executable, "path") == 0){// add args to path
+                if(DEBUG) printf("adding paths!\n");
+                // Clear old paths
+                
+                int prev_nr_paths = (*paths_struct)->nr_paths;
+                if(DEBUG) printf("prev nr paths: %ld\n",(*paths_struct)->nr_paths);
+                for(int j = 0; j < prev_nr_paths; j++){
+                    (*paths_struct)->paths[j] = NULL;
+                }
+                (*paths_struct)->nr_paths = 0;
+                (*paths_struct)->longest_path = 0;
+
+                if(num_args == 0) return 1; // we dont want to realloc to 0 so we just skip.
+                // update our paths struct to hold arg_num-1 pointers
+                if(DEBUG) printf("num_args: %d\n",num_args);
+
+                char** tmp = realloc((*paths_struct)->paths, num_args*sizeof(char*));
+                if(tmp == NULL){
+                    write(STDERR_FILENO, error_message, strlen(error_message)); 
+                    return 1;
+                }
+                (*paths_struct)->paths = tmp;
+
+                int i;
+                for(i = 1; i < num_args+1; i++){
+                    fix_path(&args[i]);
+                    (*paths_struct)->paths[i-1] = strdup(args[i]);
+                    (*paths_struct)->nr_paths++;
+
+                    if(DEBUG) printf("adding path: %s at index %d\n", (*paths_struct)->paths[i-1], i-1);
+                    if(strlen(args[i]) > (*paths_struct)->longest_path){
+                        (*paths_struct)->longest_path = strlen(args[i]);
                     }
                 }
-                token = strsep(&line, delim); 
-            }
-        }
-        free(clean_token);
-        if(args[0] == NULL){
-            if(DEBUG) fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
-        }
-        else if(strcmp(args[0], "exit") == 0){
-            if(arg_num != 1){ // invalid number of arguments
-                write(STDERR_FILENO, error_message, strlen(error_message)); 
             }
             else{
-                free(args);
-                return 0;
+                // Our command is assumed to be a binary 
+                run_command(executable, args, paths_struct, num_args , 1);
             }
-        }
-        else if(strcmp(args[0], "cd") == 0){
-            if(arg_num != 2){ // we want exactly one argument after cd
-                write(STDERR_FILENO, error_message, strlen(error_message)); 
-            }
-            else{
-                // we have exactly one argument, the path to move to
-                chdir(args[1]);
-            }
-        }
-        else if(strcmp(args[0], "path") == 0){// add args to path
-            if(DEBUG) printf("adding paths!\n");
-            // Clear old paths
-            
-            int prev_nr_paths = paths_struct->nr_paths;
-            for(int j=0; j < prev_nr_paths;j++){
-                paths_struct->paths[j] = NULL;
-            }
-            paths_struct->nr_paths = 0;
-            paths_struct->longest_path = 0;
-
-            // update our paths struct to hold arg_num-1 pointers
-            paths_struct->paths = realloc(paths_struct->paths, sizeof((arg_num-1)*sizeof(char*)));
-            if(paths_struct->paths == NULL){
-                fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
-            }
-            
-            paths_struct->nr_paths += arg_num-1; // -1 to remove the actual "path" argument (args[0])
-            
-
-            int i;
-            for(i = 1; i < arg_num; i++){
-                fix_path(&args[i]);
-                paths_struct->paths[i-1] = args[i];
-                if(DEBUG) printf("adding path: %s\n", args[i]);
-                if(strlen(args[i])> paths_struct->longest_path){
-                    paths_struct->longest_path = strlen(args[i]);
-                }
-            }
-        }
-        else{
-            // Our command is assumed to be a binary 
-            run_command(args, paths_struct, arg_num , 1);
-        }
-        free(args);
-        args = NULL;
+        }    
+        free_commandsArr(commands);
     }
     return 1; // success
 }
@@ -345,7 +389,7 @@ int main(int argc, char *argv[]) {
     int running = 1;
     while(running) {
         if(argc!=2) printf("wish> ");
-        running = handle_command(line, len, read, input_file, paths_struct);
+        running = handle_command(line, len, read, input_file, &paths_struct);
     }
     free(line);
     free(paths_struct->paths);
