@@ -133,57 +133,122 @@ void clean_string(char* cleaned, char* dirty){
     *cleaned = '\0'; // end cleaned char*
 }
 
+size_t get_total_nr_commands(const char* line){
+    if(line == NULL || *line == '\0'){
+        return 0;
+    }
+    size_t nr_pipes = 0;
+    const char *ptr = line;
+    while(*ptr != '\0'){
+        if(*ptr == '|'){
+            nr_pipes++;
+        }
+        ptr++;
+    }
+    return nr_pipes+1; // first command is not proceeded by a pipe
+}
+
+
+CommandsArr* allocate_commands_arr(size_t nr_commands){
+    CommandsArr* commands = calloc(1, sizeof(CommandsArr)); // allocate the commands array
+    if(commands == NULL){
+        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        return NULL;
+    }
+
+
+    commands->command_arr = calloc(nr_commands, sizeof(Command)); // allocate commands
+    if(commands->command_arr == NULL){
+        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        return NULL;
+    }
+    commands->size = 0; // current nr of commands 
+    commands->capacity = nr_commands;
+
+    // allocate each commands argument array
+    for(size_t command_num = 0; command_num < nr_commands; command_num++){
+        commands->command_arr[command_num].args = calloc(1, sizeof(char*)); // assume 1 argument
+        if(commands->command_arr[command_num].args == NULL){
+            fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+            return NULL;
+        }
+    }
+    return commands;
+}
+
 
 // takes in a line and returns an array of commands 
 CommandsArr* parse_line(char* line, unsigned int line_size){
     // a line is a long string
     //  we split by whitespace and set them either as executable, argument, redirect, or pipe.
 
-    char* token;
-    char* clean_token = malloc(100*sizeof(char)+1);
-    if(clean_token == NULL){
-        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
-    }
-    char* delim = " ";        
-
-    // assume a max of 1 command for now
-    int max_commands = 1;
-    CommandsArr* commands = calloc(max_commands, sizeof(CommandsArr)); // allocate 1 command array
+    size_t max_commands = get_total_nr_commands(line);     
+    CommandsArr* commands = allocate_commands_arr(max_commands);
     if(commands == NULL){
         fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        return NULL;
     }
 
     unsigned int command_num = 0; // number of current command
     unsigned int arg_num = 0; // number of current argument
+    
+    // char* redirect_ptr = strchr(&line, '>');
+    // if(redirect_ptr != NULL){
 
-    commands->command_arr = calloc(command_num, sizeof(Command)); // allocate 1 command
-    if(commands->command_arr == NULL){
+    // }
+    char* token;
+    char* clean_token = malloc(100*sizeof(char)+1); // FIXME
+    if(clean_token == NULL){
         fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        return NULL;
     }
-    commands->size = 1; // current nr of commands 
-    commands->capacity = 1;
+    char* delim = " ";   
 
-    commands->command_arr[command_num].args = calloc(arg_num, sizeof(char*)); // allocate args array
-    if(commands->command_arr[command_num].args == NULL){
-        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
-    }
+    // split line into commands by pipe symbol |
+    char* savedptr1;
+    char* command_delim = "|";
+    char* command_token = strtok_r(line, command_delim, &savedptr1);
+    while (command_token != NULL){
+        token = strsep(&command_token, delim); // split command by whitespace 
+        while(token != NULL){
+            clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
 
-    token = strsep(&line, delim); // split line 
-    while(token != NULL){
-        clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
+            size_t length = strlen(clean_token);
+            if(isspace(*clean_token) || length == 0 || clean_token == NULL) { // if the entire token is empty
+                token = strsep(&command_token, delim); // skip space-only or empty tokens
+                continue;
+            }
+            //printf("TOKEN: %s\n",clean_token);
 
-        if(isspace(*clean_token) || strlen(clean_token) == 0 || clean_token == NULL) { // if the entire token is empty
-            token = strsep(&line, delim); // skip space-only or empty tokens
-            continue;
+            // we need to parse the token for redirects
+            
+            // for (size_t i = 0;  i < length;  i++) {
+            //     //printf("char: %c\n",clean_token[i]);
+        
+            //     // Redirect!
+            //     if(clean_token[i] == '>'){
+            //         // We need to cut off the first part of the token as argument 1 and second part as outputfile   
+            //         commands->command_arr[command_num].args[arg_num] = strndup(clean_token, i);
+            //         commands->command_arr[command_num].output_file = strndup(clean_token+i,length-i);
+            //         printf("Argument: %s\n", commands->command_arr[command_num].args[arg_num]);
+            //         printf("output_file: %s\n", commands->command_arr[command_num].output_file);
+
+            //         arg_num++;
+            //         command_num++;
+            //         special_op = 1;
+            //     }
+
+            // }
+            commands->command_arr[command_num].args[arg_num] = strdup(clean_token);
+            arg_num++;
+
+            // TODO: implement piping and redirects here
+            token = strsep(&command_token, delim); 
         }
-        commands->command_arr[command_num].args[arg_num] = strdup(clean_token);
-        arg_num++;
-
-        // TODO: implement piping and redirects here
-        token = strsep(&line, delim); 
+        commands->command_arr->num_args = arg_num-1; // remove executable from num args
+        commands->size++;
+        command_token = strtok_r(NULL, command_delim, &savedptr1);
     }
-    commands->command_arr->num_args = arg_num-1; // remove executable from num args
-
     return commands;
 }
 
@@ -286,11 +351,13 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
         }
         
         CommandsArr* commands = parse_line(line, len);
-        
+        if(DEBUG) printf("nr of commands to run: %ld\n", commands->size);
         for(size_t command_num = 0; command_num < commands->size; command_num++){
             char* executable = commands->command_arr[command_num].args[0];
             char** args = commands->command_arr[command_num].args;
-            unsigned int num_args = commands->command_arr[command_num].num_args;
+            size_t num_args = commands->command_arr[command_num].num_args;
+            if (DEBUG)printf("executable: %s\n", executable);
+            if (DEBUG)printf("num_args: %ld\n", num_args);
 
             if(strcmp(executable, "exit") == 0){
                 if(num_args != 0){ // invalid number of arguments
@@ -324,7 +391,7 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
 
                 if(num_args == 0) return 1; // we dont want to realloc to 0 so we just skip.
                 // update our paths struct to hold arg_num-1 pointers
-                if(DEBUG) printf("num_args: %d\n",num_args);
+                if(DEBUG) printf("num_args: %ld\n",num_args);
 
                 char** tmp = realloc((*paths_struct)->paths, num_args*sizeof(char*));
                 if(tmp == NULL){

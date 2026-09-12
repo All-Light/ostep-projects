@@ -1,0 +1,1 @@
+./wish test.txt
