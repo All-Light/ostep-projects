@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
-#define DEBUG 0
+#define DEBUG 1
 
 /*
 Things to include: 
@@ -176,6 +176,13 @@ CommandsArr* allocate_commands_arr(size_t nr_commands){
     return commands;
 }
 
+void print_args(char** args, size_t num_args){
+    for(size_t i = 0; i < num_args+1; i++){
+        printf("argument i=%ld: %s\n", i,args[i]);
+    }
+}
+
+
 size_t parse_command(char** command_token, Command* command_obj,  int command_nr){
     size_t arg_num = 0;
     char* clean_token = malloc((strlen(*command_token)+1)*sizeof(char));
@@ -215,9 +222,11 @@ size_t parse_command(char** command_token, Command* command_obj,  int command_nr
 
         // }
         (*command_obj).args[arg_num] = strdup(clean_token);
+        (*command_obj).args[arg_num+1] = NULL; // last argument must be NULL for execvp, otherwise it crashes
+        
         arg_num++;
 
-        // TODO: implement piping and redirects here
+        // TODO: implement redirects here
         token = strsep(command_token, delim); 
     }
     return arg_num;
@@ -249,10 +258,12 @@ CommandsArr* parse_line(char* line, unsigned int line_size){
     char* command_delim = "|";
     char* command_token = strtok_r(line, command_delim, &savedptr1);
     while (command_token != NULL){
+        if(DEBUG) printf("command_token %s\n", command_token);
         arg_num = parse_command(&command_token, &commands->command_arr[command_num], command_num);
-        
+
         commands->command_arr->num_args = arg_num-1; // remove executable from num args
         commands->size++;
+        command_num++;
         command_token = strtok_r(NULL, command_delim, &savedptr1);
     }
     return commands;
@@ -277,7 +288,7 @@ void run_command(char* executable, char** args, paths_data** paths_struct, int n
     int path_found = which_path(&command_path, executable, paths_struct);
     //printf("is path found? %d\n", path_found);
     if (command_path == NULL){ 
-        if(DEBUG) printf("POINTER IS STILL NULL LINE=%d\n", __LINE__); 
+        //if(DEBUG) printf("POINTER IS STILL NULL LINE=%d\n", __LINE__); 
         write(STDERR_FILENO, error_message, strlen(error_message)); 
         free(command_path);
         return;
@@ -287,7 +298,7 @@ void run_command(char* executable, char** args, paths_data** paths_struct, int n
         free(command_path);
         return; // not found in path
     }
-    if(DEBUG) printf("command_path pointer: %p\n",command_path);
+    //if(DEBUG) printf("command_path pointer: %p\n",command_path);
 
 
     int rc = fork();
@@ -298,8 +309,8 @@ void run_command(char* executable, char** args, paths_data** paths_struct, int n
     else if (rc == 0){
         // check for redirection:
         for(int arg_nr = 0; arg_nr < nr_args; arg_nr++){
-            if(DEBUG) printf("arg:%s\n", args[arg_nr]);
-            if(DEBUG) printf("arg+1:%s\n", args[arg_nr+1]);
+            //if(DEBUG) printf("arg:%s\n", args[arg_nr]);
+            //if(DEBUG) printf("arg+1:%s\n", args[arg_nr+1]);
             if (strlen(args[arg_nr]) == 1 && args[arg_nr][0] == '>'){
                 if(DEBUG) printf("redirection caught!\n");
                 if(DEBUG) printf("nr_args: %d\n", nr_args);
@@ -321,7 +332,7 @@ void run_command(char* executable, char** args, paths_data** paths_struct, int n
                 break;
             }
         }
-
+        print_args(args, nr_args);
         execvp(command_path, args);
     }
     else if (should_wait == 1){
