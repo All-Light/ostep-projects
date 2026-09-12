@@ -99,20 +99,20 @@ int which_path(char** resulting_path_ptr, char* executable, paths_data** paths_s
 }
 
 void fix_path(char** path){ // pass-by-reference
-    if(DEBUG) printf("path pointer %p\n",path);
+    //if(DEBUG) printf("path pointer %p\n",path);
 
     int length = strlen(*path);
-    if(DEBUG) printf("path str length: %d\n", length);
-    if(DEBUG) printf("path str size: %ld\n bytes", sizeof(*path));
-    if(DEBUG) printf("path str: %s\n", *path);
-    if(DEBUG) printf("path str last %c\n", (*path)[length-1]);
+    //if(DEBUG) printf("path str length: %d\n", length);
+    //if(DEBUG) printf("path str size: %ld\n bytes", sizeof(*path));
+    //if(DEBUG) printf("path str: %s\n", *path);
+    //if(DEBUG) printf("path str last %c\n", (*path)[length-1]);
     // If path does not end in "/" we append it
     if((*path)[length-1] != '/'){
         // realloc if our buffer is too small
         (*path) = (char*) realloc((*path), (length+2)*sizeof(char));
         (*path)[length] = '/'; // append trailing slash
         (*path)[length+1] = '\0'; // string terminator
-        if(DEBUG) printf("Appended trailing slash\n");
+        //if(DEBUG) printf("Appended trailing slash\n");
     }
 }
 
@@ -451,11 +451,10 @@ CommandsArr* parse_line(char** line, unsigned int line_size){
 size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_data** paths_struct, pid_t* pids){
     size_t nr_cmds_started = 0;
     int in_fd = -1;
-    if(DEBUG) printf("start: %ld\n", start);
-    if(DEBUG) printf("end: %ld\n", end);
+    //if(DEBUG) printf("start: %ld\n", start);
+    //if(DEBUG) printf("end: %ld\n", end);
     for (size_t k = start; k <= end; k++){
         Command* command = &commands->command_arr[k];
-        if(DEBUG) printf("k: %ld\n", k);
 
         int fds[2] = {-1, -1};
         if(k < end && pipe(fds) < 0){
@@ -510,6 +509,7 @@ size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_dat
             write(STDERR_FILENO, error_message, strlen(error_message)); 
             exit(1);
         }
+
         if(in_fd != -1){
             close(in_fd);
         }
@@ -517,52 +517,15 @@ size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_dat
             close(fds[1]);
         }
         in_fd = fds[0];
-        pids[nr_cmds_started++] = pid;
+        pids[nr_cmds_started] = pid;
+        nr_cmds_started++;
     }
     if(in_fd != -1) close(in_fd);
+
+
     return nr_cmds_started;
 }
 
-
-pid_t run_command(char* executable, char** args, char* output_file, NextOp op, paths_data** paths_struct, int nr_args){
-    // allocate stack pointer for longest possible path
-    char* command_path = NULL; //FIXME: We shouldnt need to use this large of a buffer 
-    int path_found = which_path(&command_path, executable, paths_struct);
-
-    if (command_path == NULL || path_found != 0){  // could not find a valid path
-        write(STDERR_FILENO, error_message, strlen(error_message)); 
-        free(command_path);
-        return 0;
-    }
-    fflush(stdout);
-    
-    pid_t pid = fork();
-    if(pid < 0){
-        // fork was unsuccessful
-        write(STDERR_FILENO, error_message, strlen(error_message)); 
-    }
-    else if (pid == 0){
-        if(output_file != NULL){
-            // we have a redirect
-            int fd = open(output_file, O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
-            if(fd < 0){ // could not open file
-                write(STDERR_FILENO, error_message, strlen(error_message)); 
-                exit(1);
-            }
-            dup2(fd, 1); // redirect stdout
-            dup2(fd, 2); // redirect stderr
-            close(fd); // no need to keep open
-        }
-
-        if(DEBUG) print_args(args, nr_args);
-        execv(command_path, args);
-        // if execvp fails this process must die
-        write(STDERR_FILENO, error_message, strlen(error_message)); 
-        exit(1);
-    }
-    free(command_path);
-    return 0;
-}
 
 int is_builtin(char* executable){ // FIXME duplicate "str"comparisons here and in run_builtin
     if(strcmp(executable, "exit") == 0){
@@ -576,7 +539,6 @@ int is_builtin(char* executable){ // FIXME duplicate "str"comparisons here and i
 }
 
 int run_builtin(char* executable, char**args, size_t num_args, paths_data** paths_struct, CommandsArr* commands){
-    if(DEBUG) printf("run builtin\n");
     if(strcmp(executable, "exit") == 0){
         if(num_args != 1){ // invalid number of arguments
             write(STDERR_FILENO, error_message, strlen(error_message)); 
@@ -609,7 +571,6 @@ int run_builtin(char* executable, char**args, size_t num_args, paths_data** path
 
         if(num_args == 1) return 1; // we dont want to realloc to 0 so we just skip.
         // update our paths struct to hold arg_num-1 pointers
-        if(DEBUG) printf("num_args: %ld\n",num_args);
 
         char** tmp = realloc((*paths_struct)->paths, (num_args-1)*sizeof(char*));
         if(tmp == NULL){
@@ -625,7 +586,7 @@ int run_builtin(char* executable, char**args, size_t num_args, paths_data** path
             (*paths_struct)->paths[i-1] = strdup(args[i]);
             (*paths_struct)->nr_paths++;
 
-            if(DEBUG) printf("adding path: %s at index %d\n", (*paths_struct)->paths[i-1], i-1);
+            //if(DEBUG) printf("adding path: %s at index %d\n", (*paths_struct)->paths[i-1], i-1);
             if(strlen(args[i]) > (*paths_struct)->longest_path){
                 (*paths_struct)->longest_path = strlen(args[i]);
             }
@@ -663,7 +624,7 @@ int handle_command(char** line, size_t len, ssize_t read, FILE* input, paths_dat
         CommandsArr* commands = parse_line(line, len);
         
         
-        pid_t* pids = malloc(commands->size*sizeof(pid_t));
+        pid_t* pids = calloc(1,commands->size*sizeof(pid_t));
         size_t nr_children = 0;
 
         if(DEBUG) printf("nr of commands to run: %ld\n", commands->size);
@@ -694,19 +655,24 @@ int handle_command(char** line, size_t len, ssize_t read, FILE* input, paths_dat
                 }
             }
             else{
-                // Our command is assumed to be a binary 
-                // run_command(executable, args, output_file, op, paths_struct, num_args);
-                nr_children += spawn_commands(commands, command_num, end, paths_struct, pids);
+                // note that pids is offset by the number of already running children
+                nr_children += spawn_commands(commands, command_num, end, paths_struct, pids+nr_children);
             }
             command_num = end +1;
         }
+        
         if(DEBUG){
             for(size_t k = 0; k < nr_children; k++){
-                printf("waiting for pid=%d\n", pids[k]);
+                printf("waiting for pid=%d with id=%ld\n", pids[k], k);
             }
         }
-        for(size_t k=0; k < nr_children; k++){
+        //pid_t child_pid;
+        //while((waitpid(-1, NULL, 0) != -1));
+        for(size_t k = 0; k < nr_children; k++){
             waitpid(pids[k], NULL, 0);
+            // if(waitpid(pids[k], NULL, 0) < 0){
+            //     fprintf(stderr, "waitpid(%d) failed: %s\n", (int)pids[k], strerror(errno));
+            // }
         }
         free(pids);
         free_commandsArr(commands);
