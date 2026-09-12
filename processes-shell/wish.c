@@ -176,6 +176,53 @@ CommandsArr* allocate_commands_arr(size_t nr_commands){
     return commands;
 }
 
+size_t parse_command(char** command_token, Command* command_obj,  int command_nr){
+    size_t arg_num = 0;
+    char* clean_token = malloc((strlen(*command_token)+1)*sizeof(char));
+    if(clean_token == NULL){
+        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        return 0;
+    }
+    const char* delim = " ";
+    char* token = strsep(command_token, delim); // split command by whitespace 
+    while(token != NULL){
+        clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
+
+        size_t length = strlen(clean_token);
+        if(isspace(*clean_token) || length == 0 || clean_token == NULL) { // if the entire token is empty
+            token = strsep(command_token, delim); // skip space-only or empty tokens
+            continue;
+        }
+        //printf("TOKEN: %s\n",clean_token);
+
+        // we need to parse the token for redirects
+        
+        // for (size_t i = 0;  i < length;  i++) {
+        //     //printf("char: %c\n",clean_token[i]);
+    
+        //     // Redirect!
+        //     if(clean_token[i] == '>'){
+        //         // We need to cut off the first part of the token as argument 1 and second part as outputfile   
+        //         commands->command_arr[command_num].args[arg_num] = strndup(clean_token, i);
+        //         commands->command_arr[command_num].output_file = strndup(clean_token+i,length-i);
+        //         printf("Argument: %s\n", commands->command_arr[command_num].args[arg_num]);
+        //         printf("output_file: %s\n", commands->command_arr[command_num].output_file);
+
+        //         arg_num++;
+        //         command_num++;
+        //         special_op = 1;
+        //     }
+
+        // }
+        (*command_obj).args[arg_num] = strdup(clean_token);
+        arg_num++;
+
+        // TODO: implement piping and redirects here
+        token = strsep(command_token, delim); 
+    }
+    return arg_num;
+}
+
 
 // takes in a line and returns an array of commands 
 CommandsArr* parse_line(char* line, unsigned int line_size){
@@ -189,62 +236,21 @@ CommandsArr* parse_line(char* line, unsigned int line_size){
         return NULL;
     }
 
-    unsigned int command_num = 0; // number of current command
-    unsigned int arg_num = 0; // number of current argument
+    size_t command_num = 0; // number of current command
+    size_t arg_num = 0; // number of current argument
     
     // char* redirect_ptr = strchr(&line, '>');
     // if(redirect_ptr != NULL){
 
     // }
-    char* token;
-    char* clean_token = malloc(100*sizeof(char)+1); // FIXME
-    if(clean_token == NULL){
-        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
-        return NULL;
-    }
-    char* delim = " ";   
 
     // split line into commands by pipe symbol |
     char* savedptr1;
     char* command_delim = "|";
     char* command_token = strtok_r(line, command_delim, &savedptr1);
     while (command_token != NULL){
-        token = strsep(&command_token, delim); // split command by whitespace 
-        while(token != NULL){
-            clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
-
-            size_t length = strlen(clean_token);
-            if(isspace(*clean_token) || length == 0 || clean_token == NULL) { // if the entire token is empty
-                token = strsep(&command_token, delim); // skip space-only or empty tokens
-                continue;
-            }
-            //printf("TOKEN: %s\n",clean_token);
-
-            // we need to parse the token for redirects
-            
-            // for (size_t i = 0;  i < length;  i++) {
-            //     //printf("char: %c\n",clean_token[i]);
+        arg_num = parse_command(&command_token, &commands->command_arr[command_num], command_num);
         
-            //     // Redirect!
-            //     if(clean_token[i] == '>'){
-            //         // We need to cut off the first part of the token as argument 1 and second part as outputfile   
-            //         commands->command_arr[command_num].args[arg_num] = strndup(clean_token, i);
-            //         commands->command_arr[command_num].output_file = strndup(clean_token+i,length-i);
-            //         printf("Argument: %s\n", commands->command_arr[command_num].args[arg_num]);
-            //         printf("output_file: %s\n", commands->command_arr[command_num].output_file);
-
-            //         arg_num++;
-            //         command_num++;
-            //         special_op = 1;
-            //     }
-
-            // }
-            commands->command_arr[command_num].args[arg_num] = strdup(clean_token);
-            arg_num++;
-
-            // TODO: implement piping and redirects here
-            token = strsep(&command_token, delim); 
-        }
         commands->command_arr->num_args = arg_num-1; // remove executable from num args
         commands->size++;
         command_token = strtok_r(NULL, command_delim, &savedptr1);
