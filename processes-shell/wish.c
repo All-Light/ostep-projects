@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
-#define DEBUG 1
+#define DEBUG 0
 
 /*
 Things to include: 
@@ -120,15 +120,42 @@ void fix_path(char** path){ // pass-by-reference
     }
 }
 
+// trim pre- and post whitespaces from string
+char* trim_string(char* str){
+    // https://stackoverflow.com/questions/122616/how-do-i-trim-leading-trailing-whitespace-in-a-standard-way
+    if(str == NULL || strlen(str) < 1) return str;
+
+    char *start = str;
+    while(isspace((unsigned char)*start)) start++; // remove all leading whitespaces
+
+    if(start != str){
+        memmove(str, start, strlen(start)+1); // we removed some whitespaces, move the original pointer to point at first valid character
+    }
+
+    // remove trailing whitespaces
+    size_t len = strlen(str);
+    while(len > 0 && isspace((unsigned char)str[len-1])){
+        str[len-1] = '\0';
+        len--;
+    }
+    return str;
+}
+
+
 // Updates cleaned to be a copy of dirty without any isspace characters
-void clean_string(char* cleaned, char* dirty){
-    for (char c=*dirty; c; c=*++dirty) {
-        //printf("dirty char: %c\n", c);
-        if(!isspace(c)){
-            *cleaned = c;
-            //printf("clean char: %c\n",  *cleaned);
-            ++cleaned;
+void clean_string(char* cleaned, const char* dirty){
+
+    if(cleaned == NULL) return;
+    *cleaned = '\0';
+    
+    if(dirty == NULL) return;
+
+    while(*dirty != '\0'){
+        if(!isspace((unsigned char)*dirty)){
+            *cleaned = *dirty;
+            cleaned++;
         }
+        dirty++;
     }
     *cleaned = '\0'; // end cleaned char*
 }
@@ -148,14 +175,12 @@ size_t get_total_nr_commands(const char* line){
     return nr_pipes+1; // first command is not proceeded by a pipe
 }
 
-
 CommandsArr* allocate_commands_arr(size_t nr_commands){
     CommandsArr* commands = calloc(1, sizeof(CommandsArr)); // allocate the commands array
     if(commands == NULL){
         fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
         return NULL;
     }
-
 
     commands->command_arr = calloc(nr_commands, sizeof(Command)); // allocate commands
     if(commands->command_arr == NULL){
@@ -182,56 +207,117 @@ void print_args(char** args, size_t num_args){
     }
 }
 
-
-size_t parse_command(char** command_token, Command* command_obj,  int command_nr){
-    size_t arg_num = 0;
-    char* clean_token = malloc((strlen(*command_token)+1)*sizeof(char));
-    if(clean_token == NULL){
-        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+int is_valid_filename(const char* filename){
+    if(filename == NULL || *filename == '\0'){
         return 0;
     }
+    while (*filename != '\0'){
+        if(isspace((unsigned char)*filename)){
+            return 0;
+        }
+        filename++;
+    }
+    return 1;
+}
+
+size_t parse_command(char** command_token, Command* command_obj, int command_nr){
+    size_t arg_num = 0;
+
+    // split command token into actual command and redirect part (if any)
+    char* cmd_part = NULL;
+    char* remaining = (*command_token);
+    char* next_redirect = strchr(remaining, '>'); // find first '>'
+    while (next_redirect != NULL){
+
+        // this is the first redirect
+        if(cmd_part == NULL){
+            size_t cmd_length = next_redirect - remaining;
+            cmd_part = strndup(remaining, cmd_length);
+            if(DEBUG) printf("cleaned command part: %s\n", cmd_part);
+        }
+
+        // TODO: implement append and other ">"-like behaviour???
+
+
+        char* file_start = next_redirect + 1;
+        next_redirect = strchr(file_start, '>');
+        if(next_redirect != NULL){
+            // we dont allow multiple redirects
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            return arg_num;
+        }
+        // file length is size between (file_start - end) OR (file_start to next redirect) ">"
+        size_t file_length = strlen(file_start); // next_redirect != NULL ? (size_t)(next_redirect- file_start) : strlen(file_start);
+        if(file_length == 0) {
+            // invalid filename --> should not continue
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            return arg_num; 
+        
+        }
+        char* filename = strndup(file_start, file_length);
+
+        filename = trim_string(filename);
+        //printf("Redirect file: %s\n",filename);
+        if(is_valid_filename(filename) == 0) {
+            // invalid filename --> should not continue
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            free(filename);
+            return arg_num;
+        } 
+
+        // TODO: Multiple redirects in one command?
+        if(command_obj->output_file != NULL){
+            free(command_obj->output_file); // free old output file
+        }
+        command_obj->output_file = strdup(filename);
+        free(filename);
+        remaining = next_redirect;
+        if(!remaining) break;
+    }
+    
+    if(cmd_part == NULL){ // we had no redirects
+        cmd_part = (*command_token);
+    }
+
+
+
     const char* delim = " ";
-    char* token = strsep(command_token, delim); // split command by whitespace 
+    char* token = strsep(&cmd_part, delim); // split command by whitespace 
     while(token != NULL){
+        char* clean_token = malloc(strlen(token)+1);
+        if(clean_token == NULL){
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            //fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+            return 0;
+        }
         clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
 
         size_t length = strlen(clean_token);
-        if(isspace(*clean_token) || length == 0 || clean_token == NULL) { // if the entire token is empty
-            token = strsep(command_token, delim); // skip space-only or empty tokens
+        if( length == 0 || isspace(*clean_token)) { // if the entire token is empty
+            free(clean_token);
+            token = strsep(&cmd_part, delim); // skip space-only or empty tokens
             continue;
         }
-        //printf("TOKEN: %s\n",clean_token);
 
-        // we need to parse the token for redirects
-        
-        // for (size_t i = 0;  i < length;  i++) {
-        //     //printf("char: %c\n",clean_token[i]);
-    
-        //     // Redirect!
-        //     if(clean_token[i] == '>'){
-        //         // We need to cut off the first part of the token as argument 1 and second part as outputfile   
-        //         commands->command_arr[command_num].args[arg_num] = strndup(clean_token, i);
-        //         commands->command_arr[command_num].output_file = strndup(clean_token+i,length-i);
-        //         printf("Argument: %s\n", commands->command_arr[command_num].args[arg_num]);
-        //         printf("output_file: %s\n", commands->command_arr[command_num].output_file);
-
-        //         arg_num++;
-        //         command_num++;
-        //         special_op = 1;
-        //     }
-
-        // }
+        // resize our args array
+        char** tmp = realloc((*command_obj).args, (arg_num+2)*sizeof(char*));
+        if(tmp == NULL){
+            //fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            free(clean_token);
+            return 0;
+        }
+        (*command_obj).args = tmp;
         (*command_obj).args[arg_num] = strdup(clean_token);
         (*command_obj).args[arg_num+1] = NULL; // last argument must be NULL for execvp, otherwise it crashes
         
         arg_num++;
 
-        // TODO: implement redirects here
-        token = strsep(command_token, delim); 
+        free(clean_token); 
+        token = strsep(&cmd_part, delim); 
     }
     return arg_num;
 }
-
 
 // takes in a line and returns an array of commands 
 CommandsArr* parse_line(char* line, unsigned int line_size){
@@ -260,7 +346,11 @@ CommandsArr* parse_line(char* line, unsigned int line_size){
     while (command_token != NULL){
         if(DEBUG) printf("command_token %s\n", command_token);
         arg_num = parse_command(&command_token, &commands->command_arr[command_num], command_num);
-
+        if(arg_num == 0) {
+            // we hit an invalid command, we skip it
+            command_token = strtok_r(NULL, command_delim, &savedptr1);
+            continue;
+        }
         commands->command_arr->num_args = arg_num-1; // remove executable from num args
         commands->size++;
         command_num++;
@@ -274,6 +364,7 @@ void free_commandsArr(CommandsArr* commands){
         for(int i = 0; i < commands->command_arr[command_num].num_args; i++){
             free(commands->command_arr[command_num].args[i]);
         }
+        free(commands->command_arr[command_num].output_file);
         free(commands->command_arr[command_num].args);
     }
     free(commands->command_arr);
@@ -281,7 +372,7 @@ void free_commandsArr(CommandsArr* commands){
 }
 
 
-void run_command(char* executable, char** args, paths_data** paths_struct, int nr_args, int should_wait){
+void run_command(char* executable, char** args, char* output_file, paths_data** paths_struct, int nr_args, int should_wait){
     // allocate stack pointer for longest possible path
     char* command_path = NULL; //FIXME: We shouldnt need to use this large of a buffer 
     int path_found = which_path(&command_path, executable, paths_struct);
@@ -298,32 +389,15 @@ void run_command(char* executable, char** args, paths_data** paths_struct, int n
         write(STDERR_FILENO, error_message, strlen(error_message)); 
     }
     else if (rc == 0){
-        // check for redirection:
-        for(int arg_nr = 0; arg_nr < nr_args; arg_nr++){
-            //if(DEBUG) printf("arg:%s\n", args[arg_nr]);
-            //if(DEBUG) printf("arg+1:%s\n", args[arg_nr+1]);
-            if (strlen(args[arg_nr]) == 1 && args[arg_nr][0] == '>'){
-                if(DEBUG) printf("redirection caught!\n");
-                if(DEBUG) printf("nr_args: %d\n", nr_args);
-                if(DEBUG) printf("arg_nr: %d\n", arg_nr);
-                if (nr_args - arg_nr != 1){ 
-                    // multiple output files or no output file
-                    write(STDERR_FILENO, error_message, strlen(error_message)); 
-                    free(command_path);
-                    return;
-                }
-                // args[arg_nr+1] must be file nmae 
-                int fd = open(args[arg_nr+1], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
-                dup2(fd, 1); // redirect stdout
-                dup2(fd, 2); // redirect stderr
-                close(fd); // no need to keep open
-                // remove these args from actual executable
-                args[arg_nr] = NULL;
-                args[arg_nr+1] = NULL;
-                break;
-            }
+        if(output_file != NULL){
+            // we have a redirect
+            int fd = open(output_file, O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+            dup2(fd, 1); // redirect stdout
+            dup2(fd, 2); // redirect stderr
+            close(fd); // no need to keep open
         }
-        print_args(args, nr_args);
+
+        if(DEBUG) print_args(args, nr_args);
         execvp(command_path, args);
     }
     else if (should_wait == 1){
@@ -364,6 +438,8 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
             char* executable = commands->command_arr[command_num].args[0];
             char** args = commands->command_arr[command_num].args;
             size_t num_args = commands->command_arr[command_num].num_args;
+            char* output_file = commands->command_arr[command_num].output_file;
+
             if (DEBUG)printf("executable: %s\n", executable);
             if (DEBUG)printf("num_args: %ld\n", num_args);
 
@@ -422,7 +498,7 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
             }
             else{
                 // Our command is assumed to be a binary 
-                run_command(executable, args, paths_struct, num_args , 1);
+                run_command(executable, args, output_file, paths_struct, num_args , 1);
             }
         }    
         free_commandsArr(commands);
