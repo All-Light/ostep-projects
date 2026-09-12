@@ -79,26 +79,26 @@ typedef struct
 } CommandsArr;
 
 
-int which_path(char** restrict resulting_path_ptr, char* restrict executable, paths_data** restrict paths_struct){
+int which_path(char** resulting_path_ptr, char* executable, paths_data** paths_struct){
     if(DEBUG) printf("Number of available paths: %ld\n", (*paths_struct)->nr_paths);
+    int max_size = ((*paths_struct)->longest_path + strlen(executable) + 1) * sizeof(char);
+    char* candidate_path = malloc(max_size);
     for(int i = 0; i < (*paths_struct)->nr_paths; i++){
         if(DEBUG) printf("i: %d\n",i);
         if(DEBUG) printf("path: %s\n",(*paths_struct)->paths[i]);
-
-        int max_size = (strlen((*paths_struct)->paths[i]) + strlen(executable) + 1) * sizeof(char);
-        char* candidate_path = (char*) malloc(max_size);
-
         if(DEBUG) printf("executable: %s\n",executable);
+        int curr_size = (strlen((*paths_struct)->paths[i]) + strlen(executable) + 1) * sizeof(char);
+
         // copy in the candidate path into candidate_path
-        snprintf(candidate_path, max_size, "%s%s",(*paths_struct)->paths[i], executable);
+        snprintf(candidate_path, curr_size, "%s%s",(*paths_struct)->paths[i], executable);
         if(DEBUG) printf("candidate path: %s\n", candidate_path);
         if(access(candidate_path, X_OK) == 0) {
             if(DEBUG) printf("SUCCESS! candidate path ptr: %p\n", &candidate_path);
             *resulting_path_ptr = candidate_path;
             return 0;
         }
-        free(candidate_path);
     }
+    free(candidate_path); // could not find a valid path
     return 1;
 }
 
@@ -283,23 +283,14 @@ void free_commandsArr(CommandsArr* commands){
 
 void run_command(char* executable, char** args, paths_data** paths_struct, int nr_args, int should_wait){
     // allocate stack pointer for longest possible path
-    char* command_path = (char*) malloc(1000*sizeof(char)); //FIXME: We shouldnt need to use this large of a buffer 
-    command_path = NULL;
+    char* command_path = NULL; //FIXME: We shouldnt need to use this large of a buffer 
     int path_found = which_path(&command_path, executable, paths_struct);
-    //printf("is path found? %d\n", path_found);
-    if (command_path == NULL){ 
-        //if(DEBUG) printf("POINTER IS STILL NULL LINE=%d\n", __LINE__); 
+
+    if (command_path == NULL || path_found != 0){  // could not find a valid path
         write(STDERR_FILENO, error_message, strlen(error_message)); 
         free(command_path);
         return;
     }
-    if(path_found != 0){
-        write(STDERR_FILENO, error_message, strlen(error_message)); 
-        free(command_path);
-        return; // not found in path
-    }
-    //if(DEBUG) printf("command_path pointer: %p\n",command_path);
-
 
     int rc = fork();
     if(rc < 0){
