@@ -37,11 +37,9 @@ Program Error
  - Only one program error 
     write(STDERR_FILENO, error_message, strlen(error_message)); 
 
-// BUGS:
- - The echo command is buggy: echo "hi" works but echo "hi this is a test" gives invalid realloc size
- - parallelization &
+*/
 
- */
+//TODO: Implement custom tests
 //     printf("%s (%d)\n",__FILE__,__LINE__);
 
 const char error_message[30] = "An error has occurred\n";
