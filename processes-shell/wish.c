@@ -339,7 +339,8 @@ CommandsArr* parse_line(char* line, unsigned int line_size){
     size_t max_commands = get_total_nr_commands(line);     
     CommandsArr* commands = allocate_commands_arr(max_commands);
     if(commands == NULL){
-        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        //fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        write(STDERR_FILENO, error_message, strlen(error_message)); 
         return NULL;
     }
 
@@ -525,10 +526,17 @@ int main(int argc, char *argv[]) {
     if(argc == 2){
         // batch shell - overwrite input_file
         filename = argv[1];
-        input_file = fopen(filename, "r"); 
+        if(access(filename, F_OK) == 0){
+            input_file = fopen(filename, "r"); 
+        }
+        else{ // input file does not exist
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            exit(1);
+        }
     }
     else if (argc != 1){
         // invalid number of arguments
+        write(STDERR_FILENO, error_message, strlen(error_message)); 
         exit(1);
     }
 
