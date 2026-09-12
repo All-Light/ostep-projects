@@ -39,19 +39,8 @@ Program Error
 
 // BUGS:
  - The echo command is buggy: echo "hi" works but echo "hi this is a test" gives invalid realloc size
- - Magic numbers for string buffers!
- - Redirection not kinda working (> is not parsed from none-spaced words)
+ - parallelization &
 
-
-How to implement redirection (and later pipes):
-    1. We read each line normally,
-    2. Go token by token 
-    3. if we encounter ">" we set redirect_flag = 1;
-    4. when handling command and redirect_flag == 1
-        - Read argument-by-argument until we find ">"
-        - get the next argument as output file 
-        - remove output file and ">" from arguments
-        - run command as normal
  */
 //     printf("%s (%d)\n",__FILE__,__LINE__);
 
@@ -64,11 +53,18 @@ typedef struct
     size_t longest_path;
 } paths_data;
 
+typedef enum {
+    OP_NONE,        // None
+    OP_PIPE,        // '|'
+    OP_BACKGROUND,  // '&'
+} NextOp;
+
 typedef struct 
 {
     char** args;
     size_t num_args;
     char* output_file;
+    NextOp operation;
 } Command;
 
 typedef struct
@@ -160,19 +156,19 @@ void clean_string(char* cleaned, const char* dirty){
     *cleaned = '\0'; // end cleaned char*
 }
 
-size_t get_total_nr_commands(const char* line){
-    if(line == NULL || *line == '\0'){
+size_t get_total_nr_commands(char** line){
+    if(*line == NULL || **line == '\0'){
         return 0;
     }
-    size_t nr_pipes = 0;
-    const char *ptr = line;
+    size_t nr_commands = 0;
+    const char *ptr = *line;
     while(*ptr != '\0'){
-        if(*ptr == '|'){
-            nr_pipes++;
+        if(*ptr == '|' || *ptr == '&'){
+            nr_commands++;
         }
         ptr++;
     }
-    return nr_pipes+1; // first command is not proceeded by a pipe
+    return nr_commands+1; // first command is not proceeded by a | or &
 }
 
 CommandsArr* allocate_commands_arr(size_t nr_commands){
@@ -192,13 +188,35 @@ CommandsArr* allocate_commands_arr(size_t nr_commands){
 
     // allocate each commands argument array
     for(size_t command_num = 0; command_num < nr_commands; command_num++){
-        commands->command_arr[command_num].args = calloc(1, sizeof(char*)); // assume 1 argument
-        if(commands->command_arr[command_num].args == NULL){
-            fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
-            return NULL;
-        }
+        commands->command_arr[command_num].args = NULL;
+        commands->command_arr[command_num].num_args = 0;
+        commands->command_arr[command_num].output_file = NULL;
     }
     return commands;
+}
+
+void free_commandsArr(CommandsArr* commands){
+    if(commands == NULL) return;
+
+    for(size_t command_num = 0; command_num < commands->size; command_num++){
+        Command* cmd = &commands->command_arr[command_num];
+        if(cmd->args != NULL){
+            for(size_t i = 0; i < cmd->num_args; i++){
+                free(cmd->args[i]);
+            }
+        }
+        free(cmd->args);
+        cmd->args = NULL;
+
+        if(cmd->output_file != NULL){
+            free(cmd->output_file);   
+            cmd->output_file = NULL;
+        }
+    }
+    if(commands->command_arr != NULL){
+        free(commands->command_arr);
+    }
+    free(commands);
 }
 
 void print_args(char** args, size_t num_args){
@@ -220,15 +238,17 @@ int is_valid_filename(const char* filename){
     return 1;
 }
 
-size_t parse_command(char** command_token, Command* command_obj, int command_nr){
+size_t parse_command(char* command_token, Command* command_obj, int command_nr){
     size_t arg_num = 0;
+    command_obj->args = NULL;
+    command_obj->num_args = 0;
+    command_obj->output_file = NULL;
 
     // split command token into actual command and redirect part (if any)
     char* cmd_part = NULL;
-    char* remaining = (*command_token);
+    char* remaining = command_token;
     char* next_redirect = strchr(remaining, '>'); // find first '>'
     while (next_redirect != NULL){
-
         // this is the first redirect
         if(cmd_part == NULL){
             size_t cmd_length = next_redirect - remaining;
@@ -237,7 +257,7 @@ size_t parse_command(char** command_token, Command* command_obj, int command_nr)
                 write(STDERR_FILENO, error_message, strlen(error_message)); 
                 return arg_num;
             }
-            if(strlen(cmd_part)==0){
+            if(strlen(cmd_part) == 0){
                 write(STDERR_FILENO, error_message, strlen(error_message)); 
                 free(cmd_part);
                 return arg_num;
@@ -256,6 +276,7 @@ size_t parse_command(char** command_token, Command* command_obj, int command_nr)
             free(cmd_part);
             return arg_num;
         }
+
         // file length is size between (file_start - end) OR (file_start to next redirect) ">"
         size_t file_length = strlen(file_start); // next_redirect != NULL ? (size_t)(next_redirect- file_start) : strlen(file_start);
         if(file_length == 0) {
@@ -286,106 +307,149 @@ size_t parse_command(char** command_token, Command* command_obj, int command_nr)
         remaining = next_redirect;
         if(!remaining) break;
     }
-    
+    char* cmd_part_to_free = NULL;
     if(cmd_part == NULL){ // we had no redirects
-        cmd_part = (*command_token);
+        cmd_part = strdup(command_token);
+        cmd_part_to_free = cmd_part;
+    }
+    else{
+        cmd_part_to_free = cmd_part;
     }
 
-
+    char* strsep_tracker = cmd_part;
 
     const char* delim = " ";
-    char* token = strsep(&cmd_part, delim); // split command by whitespace 
+    char* token = strsep(&strsep_tracker, delim); // split command by whitespace 
     while(token != NULL){
         char* clean_token = malloc(strlen(token)+1);
         if(clean_token == NULL){
             write(STDERR_FILENO, error_message, strlen(error_message)); 
             //fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+            free(cmd_part_to_free);
             return 0;
         }
         clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
 
         size_t length = strlen(clean_token);
-        if( length == 0 || isspace(*clean_token)) { // if the entire token is empty
+        if(length == 0 || isspace(*clean_token)) { // if the entire token is empty
             free(clean_token);
-            token = strsep(&cmd_part, delim); // skip space-only or empty tokens
+            token = strsep(&strsep_tracker, delim); // skip space-only or empty tokens
             continue;
         }
 
         // resize our args array
-        char** tmp = realloc((*command_obj).args, (arg_num+2)*sizeof(char*));
+        char** tmp = realloc(command_obj->args, (arg_num+2)*sizeof(char*));
         if(tmp == NULL){
             //fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
             write(STDERR_FILENO, error_message, strlen(error_message)); 
+            free(cmd_part_to_free);
             free(clean_token);
             return 0;
         }
-        (*command_obj).args = tmp;
-        (*command_obj).args[arg_num] = strdup(clean_token);
-        (*command_obj).args[arg_num+1] = NULL; // last argument must be NULL for execvp, otherwise it crashes
+        command_obj->args = tmp;
+        command_obj->args[arg_num] = strdup(clean_token);
+        command_obj->args[arg_num+1] = NULL; // last argument must be NULL for execvp, otherwise it crashes
         
         arg_num++;
 
         free(clean_token); 
-        token = strsep(&cmd_part, delim); 
+        token = strsep(&strsep_tracker, delim); 
+    }
+    free(cmd_part_to_free);
+    if(arg_num > 0){
+        command_obj->num_args = arg_num;
+    }
+    else{
+        // failed to find any arguments
+        free(command_obj->args);
+        command_obj->args = NULL;
     }
     return arg_num;
 }
 
 // takes in a line and returns an array of commands 
-CommandsArr* parse_line(char* line, unsigned int line_size){
-    // a line is a long string
-    //  we split by whitespace and set them either as executable, argument, redirect, or pipe.
-
+CommandsArr* parse_line(char** line, unsigned int line_size){
     size_t max_commands = get_total_nr_commands(line);     
     CommandsArr* commands = allocate_commands_arr(max_commands);
     if(commands == NULL){
-        //fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
         write(STDERR_FILENO, error_message, strlen(error_message)); 
         return NULL;
     }
 
-    size_t command_num = 0; // number of current command
-    size_t arg_num = 0; // number of current argument
-    
-    // char* redirect_ptr = strchr(&line, '>');
-    // if(redirect_ptr != NULL){
+    size_t command_num = 0; // number of current command    
 
-    // }
+    // split line into commands by pipe symbol | and &
+    char* remaining = *line;
+    char* next_delim = NULL;
 
-    // split line into commands by pipe symbol |
-    char* savedptr1;
-    char* command_delim = "|";
-    char* command_token = strtok_r(line, command_delim, &savedptr1);
-    while (command_token != NULL){
-        if(DEBUG) printf("command_token %s\n", command_token);
-        arg_num = parse_command(&command_token, &commands->command_arr[command_num], command_num);
+    int keep_running = 1;
+
+    do {
+
+        // defend against white spaces and empty commands
+        while(*remaining != '\0' && isspace((unsigned char)*remaining)){
+            remaining++;
+        }
+
+        if(*remaining == '\0'){
+            break;
+        }
+
+        // locate occurences of | or & and to split our line into commands
+        next_delim = strpbrk(remaining, "|&");
+        NextOp curr_op = OP_NONE;
+        size_t cmd_segment_length;
+        if(next_delim != NULL){
+            if(*next_delim == '|'){
+                curr_op = OP_PIPE;
+            }
+            else if (*next_delim == '&'){
+                curr_op = OP_BACKGROUND;
+            }
+            *next_delim = '\0'; // remove delimiter from command
+            cmd_segment_length = next_delim - remaining;
+        }
+        else{
+            // no delimiter found --> final command
+            curr_op = OP_NONE;
+            cmd_segment_length = strlen(remaining);
+            keep_running = 0;
+        }
+        
+        // copy the master command token (parse_command may mangle it)
+        char* command_token_cpy = strndup(remaining, cmd_segment_length);
+        if(command_token_cpy == NULL){
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            free_commandsArr(commands);
+            return NULL;
+        }
+        if(DEBUG) printf("command_token_cpy %s\n", command_token_cpy);
+        size_t arg_num = parse_command(command_token_cpy, &commands->command_arr[command_num], command_num);
+
+        free(command_token_cpy); // remove copy
         if(arg_num == 0) {
-            // we hit an invalid command, we skip it
-            command_token = strtok_r(NULL, command_delim, &savedptr1);
+            // we hit an invalid command
+            if(!keep_running || next_delim == NULL){
+                break;
+            }
+            remaining = next_delim + 1;
             continue;
         }
-        commands->command_arr->num_args = arg_num-1; // remove executable from num args
+        commands->command_arr[command_num].operation = curr_op;
         commands->size++;
         command_num++;
-        command_token = strtok_r(NULL, command_delim, &savedptr1);
-    }
+
+        if(keep_running){
+            remaining = next_delim+1;
+        }
+    } while(keep_running);
+
+    
     return commands;
 }
 
-void free_commandsArr(CommandsArr* commands){
-    for(size_t command_num = 0; command_num < commands->size; command_num++){
-        for(int i = 0; i < commands->command_arr[command_num].num_args; i++){
-            free(commands->command_arr[command_num].args[i]);
-        }
-        free(commands->command_arr[command_num].output_file);
-        free(commands->command_arr[command_num].args);
-    }
-    free(commands->command_arr);
-    free(commands);
-}
 
-
-void run_command(char* executable, char** args, char* output_file, paths_data** paths_struct, int nr_args, int should_wait){
+void run_command(char* executable, char** args, char* output_file, NextOp op, paths_data** paths_struct, int nr_args){
     // allocate stack pointer for longest possible path
     char* command_path = NULL; //FIXME: We shouldnt need to use this large of a buffer 
     int path_found = which_path(&command_path, executable, paths_struct);
@@ -396,6 +460,7 @@ void run_command(char* executable, char** args, char* output_file, paths_data** 
         return;
     }
 
+    int should_wait = (op != OP_BACKGROUND); // dont wait for "&" commands
     int rc = fork();
     if(rc < 0){
         // fork was unsuccessful
@@ -412,6 +477,7 @@ void run_command(char* executable, char** args, char* output_file, paths_data** 
 
         if(DEBUG) print_args(args, nr_args);
         execvp(command_path, args);
+        exit(1); // if execvp fails this process must die
     }
     else if (should_wait == 1){
         int wc = wait(NULL);
@@ -420,9 +486,9 @@ void run_command(char* executable, char** args, char* output_file, paths_data** 
     free(command_path);
 }
 
-int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data** paths_struct){
+int handle_command(char** line, size_t len, ssize_t read, FILE* input, paths_data** paths_struct){
     errno = 0;
-    read = getline(&line, &len, input);
+    read = getline(line, &len, input);
     if (read == -1){ 
         if (errno == ENOMEM){
             // OUT OF MEMORY
@@ -440,8 +506,8 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
     }
     else{
         // Successfully read line
-        if(line[read - 1] == '\n'){ // remove trailing new line
-            line[read - 1] = '\0';
+        if((*line)[read - 1] == '\n'){ // remove trailing new line
+            (*line)[read - 1] = '\0';
             read--;
         }
         
@@ -452,12 +518,13 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
             char** args = commands->command_arr[command_num].args;
             size_t num_args = commands->command_arr[command_num].num_args;
             char* output_file = commands->command_arr[command_num].output_file;
+            NextOp op = commands->command_arr[command_num].operation;
 
             if (DEBUG)printf("executable: %s\n", executable);
             if (DEBUG)printf("num_args: %ld\n", num_args);
 
             if(strcmp(executable, "exit") == 0){
-                if(num_args != 0){ // invalid number of arguments
+                if(num_args != 1){ // invalid number of arguments
                     write(STDERR_FILENO, error_message, strlen(error_message)); 
                 }
                 else{
@@ -466,7 +533,7 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
                 }
             }
             else if(strcmp(executable, "cd") == 0){
-                if(num_args != 1){ // we want exactly one argument after cd
+                if(num_args != 2){ // we want exactly one argument after cd
                     write(STDERR_FILENO, error_message, strlen(error_message)); 
                 }
                 else{
@@ -486,19 +553,20 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
                 (*paths_struct)->nr_paths = 0;
                 (*paths_struct)->longest_path = 0;
 
-                if(num_args == 0) return 1; // we dont want to realloc to 0 so we just skip.
+                if(num_args == 1) return 1; // we dont want to realloc to 0 so we just skip.
                 // update our paths struct to hold arg_num-1 pointers
                 if(DEBUG) printf("num_args: %ld\n",num_args);
 
-                char** tmp = realloc((*paths_struct)->paths, num_args*sizeof(char*));
+                char** tmp = realloc((*paths_struct)->paths, (num_args-1)*sizeof(char*));
                 if(tmp == NULL){
                     write(STDERR_FILENO, error_message, strlen(error_message)); 
+                    free_commandsArr(commands);
                     return 1;
                 }
                 (*paths_struct)->paths = tmp;
 
                 int i;
-                for(i = 1; i < num_args+1; i++){
+                for(i = 1; i < num_args; i++){
                     fix_path(&args[i]);
                     (*paths_struct)->paths[i-1] = strdup(args[i]);
                     (*paths_struct)->nr_paths++;
@@ -511,7 +579,7 @@ int handle_command(char* line, size_t len, ssize_t read, FILE* input, paths_data
             }
             else{
                 // Our command is assumed to be a binary 
-                run_command(executable, args, output_file, paths_struct, num_args , 1);
+                run_command(executable, args, output_file, op, paths_struct, num_args);
             }
         }    
         free_commandsArr(commands);
@@ -560,7 +628,7 @@ int main(int argc, char *argv[]) {
     int running = 1;
     while(running) {
         if(argc!=2) printf("wish> ");
-        running = handle_command(line, len, read, input_file, &paths_struct);
+        running = handle_command(&line, len, read, input_file, &paths_struct);
     }
     free(line);
     free(paths_struct->paths);
