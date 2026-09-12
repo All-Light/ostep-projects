@@ -233,6 +233,15 @@ size_t parse_command(char** command_token, Command* command_obj, int command_nr)
         if(cmd_part == NULL){
             size_t cmd_length = next_redirect - remaining;
             cmd_part = strndup(remaining, cmd_length);
+            if(cmd_part == NULL){
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+                return arg_num;
+            }
+            if(strlen(cmd_part)==0){
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+                free(cmd_part);
+                return arg_num;
+            }
             if(DEBUG) printf("cleaned command part: %s\n", cmd_part);
         }
 
@@ -244,6 +253,7 @@ size_t parse_command(char** command_token, Command* command_obj, int command_nr)
         if(next_redirect != NULL){
             // we dont allow multiple redirects
             write(STDERR_FILENO, error_message, strlen(error_message)); 
+            free(cmd_part);
             return arg_num;
         }
         // file length is size between (file_start - end) OR (file_start to next redirect) ">"
@@ -251,6 +261,7 @@ size_t parse_command(char** command_token, Command* command_obj, int command_nr)
         if(file_length == 0) {
             // invalid filename --> should not continue
             write(STDERR_FILENO, error_message, strlen(error_message)); 
+            free(cmd_part);
             return arg_num; 
         
         }
@@ -261,6 +272,7 @@ size_t parse_command(char** command_token, Command* command_obj, int command_nr)
         if(is_valid_filename(filename) == 0) {
             // invalid filename --> should not continue
             write(STDERR_FILENO, error_message, strlen(error_message)); 
+            free(cmd_part);
             free(filename);
             return arg_num;
         } 
