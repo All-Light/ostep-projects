@@ -37,6 +37,9 @@ Program Error
  - Only one program error 
     write(STDERR_FILENO, error_message, strlen(error_message)); 
 
+FIXME:
+ - The getline command still yields a memory leak on each new command...
+
 */
 
 //TODO: Implement custom tests
@@ -154,12 +157,12 @@ void clean_string(char* cleaned, const char* dirty){
     *cleaned = '\0'; // end cleaned char*
 }
 
-size_t get_total_nr_commands(char** line){
-    if(*line == NULL || **line == '\0'){
+size_t get_total_nr_commands(char* line){
+    if(line == NULL || *line == '\0'){
         return 0;
     }
     size_t nr_commands = 0;
-    const char *ptr = *line;
+    char *ptr = line;
     while(*ptr != '\0'){
         if(*ptr == '|' || *ptr == '&'){
             nr_commands++;
@@ -366,7 +369,7 @@ size_t parse_command(char* command_token, Command* command_obj, int command_nr){
 }
 
 // takes in a line and returns an array of commands 
-CommandsArr* parse_line(char** line, unsigned int line_size){
+CommandsArr* parse_line(char* line, unsigned int line_size){
     size_t max_commands = get_total_nr_commands(line);     
     CommandsArr* commands = allocate_commands_arr(max_commands);
     if(commands == NULL){
@@ -377,7 +380,7 @@ CommandsArr* parse_line(char** line, unsigned int line_size){
     size_t command_num = 0; // number of current command    
 
     // split line into commands by pipe symbol | and &
-    char* remaining = *line;
+    char* remaining = line;
     char* next_delim = NULL;
 
     int keep_running = 1;
@@ -618,8 +621,8 @@ int handle_command(char** line, size_t len, ssize_t read, FILE* input, paths_dat
             (*line)[read - 1] = '\0';
             read--;
         }
-        
-        CommandsArr* commands = parse_line(line, len);
+
+        CommandsArr* commands = parse_line(*line, len);
         
         
         pid_t* pids = calloc(1,commands->size*sizeof(pid_t));
@@ -649,6 +652,7 @@ int handle_command(char** line, size_t len, ssize_t read, FILE* input, paths_dat
                 int success = run_builtin(executable, args, num_args, paths_struct, commands);
                 if(success == 0){
                     // EXIT!
+                    free(pids);
                     return 0;
                 }
             }
