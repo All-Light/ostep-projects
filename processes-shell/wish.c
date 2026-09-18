@@ -369,7 +369,7 @@ size_t parse_command(char* command_token, Command* command_obj, int command_nr){
 }
 
 // takes in a line and returns an array of commands 
-CommandsArr* parse_line(char* line, unsigned int line_size){
+CommandsArr* parse_line(char* line, size_t line_size){
     size_t max_commands = get_total_nr_commands(line);     
     CommandsArr* commands = allocate_commands_arr(max_commands);
     if(commands == NULL){
@@ -597,9 +597,9 @@ int run_builtin(char* executable, char**args, size_t num_args, paths_data** path
 }
 
 
-int handle_command(char** line, size_t len, ssize_t read, FILE* input, paths_data** paths_struct){
+int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_data** paths_struct){
     errno = 0;
-    read = getline(line, &len, input);
+    read = getline(line, len, input);
     if (read == -1){ 
         if (errno == ENOMEM){
             // OUT OF MEMORY
@@ -616,13 +616,14 @@ int handle_command(char** line, size_t len, ssize_t read, FILE* input, paths_dat
         }
     }
     else{
-        // Successfully read line
-        if((*line)[read - 1] == '\n'){ // remove trailing new line
-            (*line)[read - 1] = '\0';
+        // Successfully read line  
+        char* cleaned_line = *line;
+        if(cleaned_line[read - 1] == '\n'){ // remove trailing new line
+            cleaned_line[read - 1] = '\0';
             read--;
         }
 
-        CommandsArr* commands = parse_line(*line, len);
+        CommandsArr* commands = parse_line(cleaned_line, *len);
         
         
         pid_t* pids = calloc(1,commands->size*sizeof(pid_t));
@@ -725,7 +726,7 @@ int main(int argc, char *argv[]) {
     int running = 1;
     while(running) {
         if(argc!=2) printf("wish> ");
-        running = handle_command(&line, len, read, input_file, &paths_struct);
+        running = handle_command(&line, &len, read, input_file, &paths_struct);
     }
     free(line);
     free(paths_struct->paths);
