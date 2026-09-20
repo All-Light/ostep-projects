@@ -449,15 +449,44 @@ CommandsArr* parse_line(char* line, size_t line_size){
     return commands;
 }
 
+
+//https://linuxvox.com/blog/almost-perfect-c-shell-piping/
+void handle_piping(size_t start, size_t end, size_t current_index, int in_fd, int out_fd){
+    if(current_index > start && in_fd != -1){
+        // read from pipe
+        dup2(in_fd, STDIN_FILENO); // overwrite stdin with in_fd (previous command output)
+        close(in_fd);
+    }
+    if (current_index < end && out_fd != -1){
+        // output to pipe
+        dup2(out_fd,STDOUT_FILENO); // overwrite stdout with out_fd (next command input)
+        close(out_fd);
+    }
+
+}
+
+void handle_redirect(Command* command){
+    if(command->output_file != NULL){
+        // we have a redirect!
+        int fd = open(command->output_file, O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+        if(fd < 0){ // could not open file
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            exit(1); // kill child process
+        }
+        dup2(fd, STDOUT_FILENO); // redirect stdout
+        dup2(fd, STDERR_FILENO); // redirect stderr
+        close(fd); // no need to keep open
+    }
+}
+
 size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_data** paths_struct, pid_t* pids){
     size_t nr_cmds_started = 0;
-    int in_fd = -1;
-    //if(DEBUG) printf("start: %ld\n", start);
-    //if(DEBUG) printf("end: %ld\n", end);
+    int in_fd = -1; // holds the fd of the previous piped command's output (as input to next command)
+
     for (size_t k = start; k <= end; k++){
         Command* command = &commands->command_arr[k];
 
-        int fds[2] = {-1, -1};
+        int fds[2] = {-1, -1}; // fds[0] = current command reads from here; fds[1] = current command writes to here
         if(k < end && pipe(fds) < 0){
             write(STDERR_FILENO, error_message, strlen(error_message)); 
             break;
@@ -475,27 +504,8 @@ size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_dat
             break;
         }
         else if (pid == 0){
-
-            if(in_fd != -1){ // We open stdin from pipe
-                dup2(in_fd, STDIN_FILENO);
-                close(in_fd);
-            }
-            if(fds[1] != -1){ // We open stdout to pipe
-                close(fds[0]);
-                dup2(fds[1], STDOUT_FILENO);
-                close(fds[1]);
-            }
-            if(command->output_file != NULL){
-                // we have a redirect!
-                int fd = open(command->output_file, O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
-                if(fd < 0){ // could not open file
-                    write(STDERR_FILENO, error_message, strlen(error_message)); 
-                    exit(1); // kill child process
-                }
-                dup2(fd, STDOUT_FILENO); // redirect stdout
-                dup2(fd, STDERR_FILENO); // redirect stderr
-                close(fd); // no need to keep open
-            }
+            handle_piping(start,end,k, in_fd, fds[1]);
+            handle_redirect(command);
 
             //if(DEBUG) print_args(args, nr_args);
             char* path = NULL;
@@ -510,18 +520,19 @@ size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_dat
             write(STDERR_FILENO, error_message, strlen(error_message)); 
             exit(1);
         }
-
+        // close both pipe ends (in parent)
         if(in_fd != -1){
             close(in_fd);
         }
         if(fds[1] != -1){
             close(fds[1]);
         }
-        in_fd = fds[0];
+        in_fd = fds[0]; // the next iteration has fds[0] as input
+        
         pids[nr_cmds_started] = pid;
         nr_cmds_started++;
     }
-    if(in_fd != -1) close(in_fd);
+    if(in_fd != -1) close(in_fd); // close last pipe
 
 
     return nr_cmds_started;
