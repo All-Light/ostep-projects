@@ -473,7 +473,7 @@ void handle_redirect(Command* command){
         int fd = open(command->output_file, O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
         if(fd < 0){ // could not open file
             write(STDERR_FILENO, error_message, strlen(error_message)); 
-            exit(1); // kill child process
+            _exit(1); // kill child process without flushing inherited streams
         }
         dup2(fd, STDOUT_FILENO); // redirect stdout
         dup2(fd, STDERR_FILENO); // redirect stderr
@@ -507,7 +507,7 @@ size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_dat
         }
         else if (pid == 0){
             // we must close the read end of this pipe as this child wont use it (the next command, handled by the parent, will).
-            if(fds[0] != 0){
+            if(fds[0] != -1){
                 close(fds[0]);
             }
             handle_piping(start,end,k, in_fd, fds[1]);
@@ -518,13 +518,13 @@ size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_dat
             if(which_path(&path, command->args[0], paths_struct) != 0){
                 // could not find path
                 write(STDERR_FILENO, error_message, strlen(error_message)); 
-                exit(1); // kill child process
+                _exit(1); // do not flush inherited stdio buffers
             }
 
             execv(path, command->args);
             // if execvp fails this process must die
             write(STDERR_FILENO, error_message, strlen(error_message)); 
-            exit(1);
+            _exit(1);
         }
         // close both pipe ends (in parent)
         if(in_fd != -1){
