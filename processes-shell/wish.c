@@ -582,7 +582,7 @@ int run_builtin(char* executable, char**args, size_t num_args, paths_data** path
         int prev_nr_paths = (*paths_struct)->nr_paths;
         if(DEBUG) printf("prev nr paths: %ld\n",(*paths_struct)->nr_paths);
         for(int j = 0; j < prev_nr_paths; j++){
-            if((*paths_struct)->paths[j] != NULL) free((*paths_struct)->paths[j]);
+            free((*paths_struct)->paths[j]);
             (*paths_struct)->paths[j] = NULL;
         }
         (*paths_struct)->nr_paths = 0;
@@ -756,7 +756,13 @@ int main(int argc, char *argv[]) {
         write(STDERR_FILENO, error_message, strlen(error_message)); 
         exit(1);
     }
-    paths_struct->paths[0] = "/bin/";
+    paths_struct->paths[0] = strdup("/bin/");
+    if(paths_struct->paths[0] == NULL){
+        write(STDERR_FILENO, error_message, strlen(error_message)); 
+        free(paths_struct->paths);
+        free(paths_struct);
+        exit(1);
+    }
     paths_struct->longest_path = strlen(paths_struct->paths[0]);
     paths_struct->nr_paths = 1;
 
@@ -766,6 +772,9 @@ int main(int argc, char *argv[]) {
         running = handle_command(&line, &len, read, input_file, &paths_struct);
     }
     free(line);
+    for(size_t i = 0; i <paths_struct->nr_paths; i++){
+        free(paths_struct->paths[i]);
+    }
     free(paths_struct->paths);
     free(paths_struct);
     if(argc == 2){
