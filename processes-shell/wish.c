@@ -7,6 +7,8 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #define DEBUG 0
 
@@ -566,7 +568,11 @@ int run_builtin(char* executable, char**args, size_t num_args, paths_data** path
         }
         else{
             // we have exactly one argument, the path to move to
-            chdir(args[1]);
+            int success = chdir(args[1]);
+            if(success != 0){
+                // failed to change dir
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+            }
         }
     }
     else if(strcmp(executable, "path") == 0){// add args to path
@@ -576,6 +582,7 @@ int run_builtin(char* executable, char**args, size_t num_args, paths_data** path
         int prev_nr_paths = (*paths_struct)->nr_paths;
         if(DEBUG) printf("prev nr paths: %ld\n",(*paths_struct)->nr_paths);
         for(int j = 0; j < prev_nr_paths; j++){
+            if((*paths_struct)->paths[j] != NULL) free((*paths_struct)->paths[j]);
             (*paths_struct)->paths[j] = NULL;
         }
         (*paths_struct)->nr_paths = 0;
@@ -703,6 +710,25 @@ int main(int argc, char *argv[]) {
         filename = argv[1];
         if(access(filename, F_OK) == 0){
             input_file = fopen(filename, "r"); 
+            if(input_file == NULL){
+                // could not open batch file
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+                exit(1);
+            }
+
+            struct stat path_stat; // can we read file metadata? if not we exit.
+            if(fstat(fileno(input_file), &path_stat) != 0){ 
+                fclose(input_file);
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+                exit(1);
+            }
+
+            if(!S_ISREG(path_stat.st_mode)){ 
+                // this is not a regular file
+                fclose(input_file);
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+                exit(1);
+            }
         }
         else{ // input file does not exist
             write(STDERR_FILENO, error_message, strlen(error_message)); 
