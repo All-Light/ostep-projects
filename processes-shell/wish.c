@@ -506,6 +506,10 @@ size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_dat
             break;
         }
         else if (pid == 0){
+            // we must close the read end of this pipe as this child wont use it (the next command, handled by the parent, will).
+            if(fds[0] != 0){
+                close(fds[0]);
+            }
             handle_piping(start,end,k, in_fd, fds[1]);
             handle_redirect(command);
 
