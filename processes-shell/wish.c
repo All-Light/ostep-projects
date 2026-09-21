@@ -39,9 +39,6 @@ Program Error
  - Only one program error 
     write(STDERR_FILENO, error_message, strlen(error_message)); 
 
-FIXME:
- - The getline command still yields a memory leak on each new command...
-
 */
 
 //TODO: Implement custom tests
@@ -106,20 +103,15 @@ int which_path(char** resulting_path_ptr, char* executable, paths_data** paths_s
 }
 
 void fix_path(char** path){ // pass-by-reference
-    //if(DEBUG) printf("path pointer %p\n",path);
 
     int length = strlen(*path);
-    //if(DEBUG) printf("path str length: %d\n", length);
-    //if(DEBUG) printf("path str size: %ld\n bytes", sizeof(*path));
-    //if(DEBUG) printf("path str: %s\n", *path);
-    //if(DEBUG) printf("path str last %c\n", (*path)[length-1]);
+
     // If path does not end in "/" we append it
     if((*path)[length-1] != '/'){
         // realloc if our buffer is too small
         (*path) = (char*) realloc((*path), (length+2)*sizeof(char));
         (*path)[length] = '/'; // append trailing slash
         (*path)[length+1] = '\0'; // string terminator
-        //if(DEBUG) printf("Appended trailing slash\n");
     }
 }
 
@@ -189,13 +181,13 @@ size_t get_total_nr_commands(char* line){
 CommandsArr* allocate_commands_arr(size_t nr_commands){
     CommandsArr* commands = calloc(1, sizeof(CommandsArr)); // allocate the commands array
     if(commands == NULL){
-        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        write(STDERR_FILENO, error_message, strlen(error_message)); 
         return NULL;
     }
 
     commands->command_arr = calloc(nr_commands, sizeof(Command)); // allocate commands
     if(commands->command_arr == NULL){
-        fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        write(STDERR_FILENO, error_message, strlen(error_message)); 
         return NULL;
     }
     commands->size = 0; // current nr of commands 
@@ -471,12 +463,20 @@ CommandsArr* parse_line(char* line, size_t line_size){
 void handle_piping(size_t start, size_t end, size_t current_index, int in_fd, int out_fd){
     if(current_index > start && in_fd != -1){
         // read from pipe
-        dup2(in_fd, STDIN_FILENO); // overwrite stdin with in_fd (previous command output)
+        int result = dup2(in_fd, STDIN_FILENO); // overwrite stdin with in_fd (previous command output)
+        if(result == -1){ // could not overwrite
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            _exit(1);
+        }
         close(in_fd);
     }
     if (current_index < end && out_fd != -1){
         // output to pipe
-        dup2(out_fd,STDOUT_FILENO); // overwrite stdout with out_fd (next command input)
+        int result = dup2(out_fd,STDOUT_FILENO); // overwrite stdout with out_fd (next command input)
+        if(result == -1){ // could not overwrite
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            _exit(1);
+        }
         close(out_fd);
     }
 
@@ -501,8 +501,16 @@ void handle_redirect(Command* command){
             write(STDERR_FILENO, error_message, strlen(error_message)); 
             _exit(1); // kill child process without flushing inherited streams
         }
-        dup2(fd, STDOUT_FILENO); // redirect stdout
-        dup2(fd, STDERR_FILENO); // redirect stderr
+        int result_stdout = dup2(fd, STDOUT_FILENO); // redirect stdout
+        if(result_stdout == -1){ // could not overwrite
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            _exit(1);
+        }
+        int result_stderr = dup2(fd, STDERR_FILENO); // redirect stderr
+        if(result_stderr == -1){ // could not overwrite
+            write(STDERR_FILENO, error_message, strlen(error_message)); 
+            _exit(1);
+        }
         close(fd); // no need to keep open
     }
 }
@@ -662,7 +670,6 @@ int run_builtin(char* executable, char**args, size_t num_args, paths_data** path
         char** tmp = realloc((*paths_struct)->paths, (num_args-1)*sizeof(char*));
         if(tmp == NULL){
             write(STDERR_FILENO, error_message, strlen(error_message)); 
-            free_commandsArr(commands);
             return 1;
         }
         (*paths_struct)->paths = tmp;
@@ -690,6 +697,7 @@ int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_da
         if (errno == ENOMEM){
             // OUT OF MEMORY
             write(STDERR_FILENO, error_message, strlen(error_message)); 
+            return 0;
             
         }
         else if (feof(input)){
@@ -699,6 +707,7 @@ int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_da
         else{
             // Could not read input
             write(STDERR_FILENO, error_message, strlen(error_message)); 
+            return 0;
         }
     }
     else{
@@ -767,13 +776,8 @@ int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_da
                 printf("waiting for pid=%d with id=%ld\n", pids[k], k);
             }
         }
-        //pid_t child_pid;
-        //while((waitpid(-1, NULL, 0) != -1));
         for(size_t k = 0; k < nr_children; k++){
             waitpid(pids[k], NULL, 0);
-            // if(waitpid(pids[k], NULL, 0) < 0){
-            //     fprintf(stderr, "waitpid(%d) failed: %s\n", (int)pids[k], strerror(errno));
-            // }
         }
         free(pids);
         free_commandsArr(commands);
