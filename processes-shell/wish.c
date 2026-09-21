@@ -321,21 +321,21 @@ size_t parse_command(char* command_token, Command* command_obj, int command_nr){
 
     char* strsep_tracker = cmd_part;
 
-    const char* delim = " ";
+    const char* delim = " \t";
     char* token = strsep(&strsep_tracker, delim); // split command by whitespace 
     while(token != NULL){
-        char* clean_token = malloc(strlen(token)+1);
-        if(clean_token == NULL){
-            write(STDERR_FILENO, error_message, strlen(error_message)); 
-            //fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
-            free(cmd_part_to_free);
-            return 0;
-        }
-        clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
+        // char* clean_token = malloc(strlen(token)+1);
+        // if(clean_token == NULL){
+        //     write(STDERR_FILENO, error_message, strlen(error_message)); 
+        //     //fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
+        //     free(cmd_part_to_free);
+        //     return 0;
+        // }
+        // clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
 
-        size_t length = strlen(clean_token);
-        if(length == 0 || isspace(*clean_token)) { // if the entire token is empty
-            free(clean_token);
+        size_t length = strlen(token);
+        if(length == 0 || isspace(*token)) { // if the entire token is empty
+            //free(clean_token);
             token = strsep(&strsep_tracker, delim); // skip space-only or empty tokens
             continue;
         }
@@ -346,16 +346,16 @@ size_t parse_command(char* command_token, Command* command_obj, int command_nr){
             //fprintf(stderr, "NULL POINTER at line %d\n", __LINE__);
             write(STDERR_FILENO, error_message, strlen(error_message)); 
             free(cmd_part_to_free);
-            free(clean_token);
+            //free(clean_token);
             return 0;
         }
         command_obj->args = tmp;
-        command_obj->args[arg_num] = strdup(clean_token);
+        command_obj->args[arg_num] = strdup(token);
         command_obj->args[arg_num+1] = NULL; // last argument must be NULL for execvp, otherwise it crashes
         
         arg_num++;
 
-        free(clean_token); 
+        //free(clean_token); 
         token = strsep(&strsep_tracker, delim); 
     }
     free(cmd_part_to_free);
