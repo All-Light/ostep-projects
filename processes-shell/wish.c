@@ -802,7 +802,7 @@ int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_da
         for(size_t k = 0; k < nr_children; k++){
             do{
                 result = waitpid(pids[k], NULL, 0);
-            } while(result == -1 && errno == EINTR); // we must loop again if the waitpid returns that the child was interrupted and will start again
+            } while(result == -1 && errno == EINTR); // we must loop again if the waitpid returns that the parent was interrupted for some reason
             if(result == -1){ // the waitpid command failed for some reason
                 write(STDERR_FILENO, error_message, strlen(error_message));
             }
