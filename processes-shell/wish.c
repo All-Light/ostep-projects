@@ -798,8 +798,14 @@ int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_da
                 printf("waiting for pid=%d with id=%ld\n", pids[k], k);
             }
         }
+        pid_t result;
         for(size_t k = 0; k < nr_children; k++){
-            waitpid(pids[k], NULL, 0);
+            do{
+                result = waitpid(pids[k], NULL, 0);
+            } while(result == -1 && errno == EINTR); // we must loop again if the waitpid returns that the child was interrupted and will start again
+            if(result == -1){ // the waitpid command failed for some reason
+                write(STDERR_FILENO, error_message, strlen(error_message));
+            }
         }
         free(pids);
         free_commandsArr(commands);
@@ -873,7 +879,7 @@ int main(int argc, char *argv[]) {
     paths_struct->nr_paths = 1;
 
     int running = 1;
-    while(running) {
+    while(running > 0) {
         if(argc!=2) printf("wish> ");
         running = handle_command(&line, &len, read, input_file, &paths_struct);
     }
