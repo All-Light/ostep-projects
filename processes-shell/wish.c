@@ -75,6 +75,7 @@ typedef struct
     Command* command_arr; // pointer to command array
     size_t size; // nr slots filled
     size_t capacity; // total allocated slots
+    int invalid;
 } CommandsArr;
 
 
@@ -82,6 +83,9 @@ int which_path(char** resulting_path_ptr, char* executable, paths_data** paths_s
     //if(DEBUG) printf("Number of available paths: %ld\n", (*paths_struct)->nr_paths);
     int max_size = ((*paths_struct)->longest_path + strlen(executable) + 1) * sizeof(char);
     char* candidate_path = malloc(max_size);
+    if(candidate_path == NULL){
+        return 1;
+    }
     for(int i = 0; i < (*paths_struct)->nr_paths; i++){
         //if(DEBUG) printf("i: %d\n",i);
         //if(DEBUG) printf("path: %s\n",(*paths_struct)->paths[i]);
@@ -138,6 +142,14 @@ char* trim_string(char* str){
         len--;
     }
     return str;
+}
+
+int contains_nonspace(const char* str){
+    while(*str != '\0'){
+        if(!isspace((unsigned char)*str)) return 1;
+        str++;
+    }
+    return 0;
 }
 
 
@@ -321,7 +333,7 @@ size_t parse_command(char* command_token, Command* command_obj, int command_nr){
 
     char* strsep_tracker = cmd_part;
 
-    const char* delim = " \t";
+    const char* delim = " \t\r\n\v\f";
     char* token = strsep(&strsep_tracker, delim); // split command by whitespace 
     while(token != NULL){
         // char* clean_token = malloc(strlen(token)+1);
@@ -334,7 +346,7 @@ size_t parse_command(char* command_token, Command* command_obj, int command_nr){
         // clean_string(clean_token, token); // clean string i.e remove whitespaces and \t etc
 
         size_t length = strlen(token);
-        if(length == 0 || isspace(*token)) { // if the entire token is empty
+        if(length == 0) { // consecutive whitespace delimiters yield empty tokens
             //free(clean_token);
             token = strsep(&strsep_tracker, delim); // skip space-only or empty tokens
             continue;
@@ -431,7 +443,10 @@ CommandsArr* parse_line(char* line, size_t line_size){
 
         free(command_token_cpy); // remove copy
         if(arg_num == 0) {
-            // we hit an invalid command
+            if(contains_nonspace(remaining)){
+                commands->invalid = 1;
+                break;
+            }
             if(!keep_running || next_delim == NULL){
                 break;
             }
@@ -467,6 +482,17 @@ void handle_piping(size_t start, size_t end, size_t current_index, int in_fd, in
 
 }
 
+int is_builtin(char* executable){ // FIXME duplicate "str"comparisons here and in run_builtin
+    if(strcmp(executable, "exit") == 0){
+        return 1;
+    }else if(strcmp(executable, "cd") == 0){
+        return 1;
+    }else if(strcmp(executable, "path") == 0){
+        return 1;
+    }
+    return 0;
+}
+
 void handle_redirect(Command* command){
     if(command->output_file != NULL){
         // we have a redirect!
@@ -480,6 +506,35 @@ void handle_redirect(Command* command){
         close(fd); // no need to keep open
     }
 }
+
+int validate_pipeline(const char* line){
+    const char* start = line;
+
+    for (const char* op = strpbrk(start, "|&"); op !=NULL; op = strpbrk(start, "|&")){
+        if(*op == '|'){
+            // make sure we have a command before AND after the pipe symbol "|"
+            int cmd_before = 0;
+            int cmd_after = 0;
+
+            for(const char* c = start; c < op; c++){
+                if(!isspace((unsigned char)*c)) cmd_before = 1;
+            }
+
+            const char* next_op = strpbrk(op+1, "|&");
+            const char* end = next_op == NULL ? op+1 +strlen(op+1): next_op;
+
+            for(const char* c = op+1; c < end; c++){
+                if(!isspace((unsigned char)*c)) cmd_after = 1;
+            }
+            if(!cmd_before || !cmd_after){
+                return 0; // the pipeline is invalid!
+            }
+        }
+        start = op+1;
+    }
+    return 1; // the pipeline is valid!
+}
+
 
 size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_data** paths_struct, pid_t* pids){
     size_t nr_cmds_started = 0;
@@ -513,6 +568,26 @@ size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_dat
             handle_piping(start,end,k, in_fd, fds[1]);
             handle_redirect(command);
 
+            // we must be able to catch errors in the builtins for a child as a part of a pipeline
+            if(is_builtin(command->args[0])){
+                if(strcmp(command->args[0], "exit") == 0){
+                    if(command->num_args != 1){
+                        write(STDERR_FILENO, error_message, strlen(error_message));
+                        _exit(1);
+                    }
+                    _exit(0);
+                }
+                if(strcmp(command->args[0], "cd") == 0){
+                    if(command->num_args != 2 || chdir(command->args[1]) != 0){
+                        write(STDERR_FILENO, error_message, strlen(error_message));
+                        _exit(1);
+                    }
+                    _exit(0);
+                }
+                // it must then be "path", which we assume is child-local without any output, so we exit
+                _exit(0);
+            }
+
             //if(DEBUG) print_args(args, nr_args);
             char* path = NULL;
             if(which_path(&path, command->args[0], paths_struct) != 0){
@@ -544,17 +619,6 @@ size_t spawn_commands(CommandsArr* commands, size_t start, size_t end, paths_dat
     return nr_cmds_started;
 }
 
-
-int is_builtin(char* executable){ // FIXME duplicate "str"comparisons here and in run_builtin
-    if(strcmp(executable, "exit") == 0){
-        return 1;
-    }else if(strcmp(executable, "cd") == 0){
-        return 1;
-    }else if(strcmp(executable, "path") == 0){
-        return 1;
-    }
-    return 0;
-}
 
 int run_builtin(char* executable, char**args, size_t num_args, paths_data** paths_struct, CommandsArr* commands){
     if(strcmp(executable, "exit") == 0){
@@ -645,7 +709,19 @@ int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_da
             read--;
         }
 
+        if(validate_pipeline(cleaned_line) != 1){
+            write(STDERR_FILENO, error_message, strlen(error_message));
+            return 1;
+        }
+
         CommandsArr* commands = parse_line(cleaned_line, *len);
+        if(commands == NULL){
+            return 1;
+        }
+        if(commands->invalid){
+            free_commandsArr(commands);
+            return 1;
+        }
         
         
         pid_t* pids = calloc(1,commands->size*sizeof(pid_t));
