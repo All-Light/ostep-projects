@@ -379,7 +379,6 @@ CommandsArr* parse_line(char* line, size_t line_size){
     size_t max_commands = get_total_nr_commands(line);     
     CommandsArr* commands = allocate_commands_arr(max_commands);
     if(commands == NULL){
-        write(STDERR_FILENO, error_message, strlen(error_message)); 
         return NULL;
     }
 
@@ -697,7 +696,7 @@ int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_da
         if (errno == ENOMEM){
             // OUT OF MEMORY
             write(STDERR_FILENO, error_message, strlen(error_message)); 
-            return 0;
+            return -1;
             
         }
         else if (feof(input)){
@@ -707,7 +706,7 @@ int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_da
         else{
             // Could not read input
             write(STDERR_FILENO, error_message, strlen(error_message)); 
-            return 0;
+            return -1;
         }
     }
     else{
@@ -864,5 +863,10 @@ int main(int argc, char *argv[]) {
     if(argc == 2){
         fclose(input_file);
     }
-    return 0;
+    if(running == 0){
+        return 0;
+    }
+    else{
+        return 1; // our handle_command return -1, i.e an error in reading
+    }
 }
