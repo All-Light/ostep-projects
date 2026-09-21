@@ -102,17 +102,23 @@ int which_path(char** resulting_path_ptr, char* executable, paths_data** paths_s
     return 1;
 }
 
-void fix_path(char** path){ // pass-by-reference
+int fix_path(char** path){ // pass-by-reference
 
     int length = strlen(*path);
-
-    // If path does not end in "/" we append it
-    if((*path)[length-1] != '/'){
-        // realloc if our buffer is too small
-        (*path) = (char*) realloc((*path), (length+2)*sizeof(char));
-        (*path)[length] = '/'; // append trailing slash
-        (*path)[length+1] = '\0'; // string terminator
+    if(length > 0 && (*path)[length-1] == '/'){
+        return 0;
     }
+
+    // realloc if our buffer is too small
+    char* tmp = realloc((*path), (length+2)*sizeof(char));
+    if(tmp == NULL){
+        return -1;
+    }
+
+    tmp[length] = '/'; // append trailing slash
+    tmp[length+1] = '\0'; // string terminator
+    *path = tmp;
+    return 0;
 }
 
 // trim pre- and post whitespaces from string
@@ -675,8 +681,16 @@ int run_builtin(char* executable, char**args, size_t num_args, paths_data** path
 
         int i;
         for(i = 1; i < num_args; i++){
-            fix_path(&args[i]);
-            (*paths_struct)->paths[i-1] = strdup(args[i]);
+            if(fix_path(&args[i]) == -1){
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+                return 1;
+            }
+            char* copy = strdup(args[i]);
+            if(copy == NULL){
+                write(STDERR_FILENO, error_message, strlen(error_message)); 
+                return 1;
+            }
+            (*paths_struct)->paths[i-1] = copy;
             (*paths_struct)->nr_paths++;
 
             //if(DEBUG) printf("adding path: %s at index %d\n", (*paths_struct)->paths[i-1], i-1);
@@ -730,9 +744,18 @@ int handle_command(char** line, size_t* len, ssize_t read, FILE* input, paths_da
             free_commandsArr(commands);
             return 1;
         }
+        if(commands->size == 0){
+            free_commandsArr(commands);
+            return 1;
+        }
         
         
-        pid_t* pids = calloc(1,commands->size*sizeof(pid_t));
+        pid_t* pids = calloc(commands->size,sizeof(*pids));
+        if(pids == NULL){
+            write(STDERR_FILENO, error_message, strlen(error_message));
+            free_commandsArr(commands);
+            return 1;
+        }
         size_t nr_children = 0;
 
         if(DEBUG) printf("nr of commands to run: %ld\n", commands->size);
