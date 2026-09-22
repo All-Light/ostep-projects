@@ -331,7 +331,7 @@ size_t parse_command(char* command_token, Command* command_obj, int command_nr){
 
     char* strsep_tracker = cmd_part;
 
-    const char* delim = " \t\r\n\v\f";
+    const char* delim = " \t";
     char* token = strsep(&strsep_tracker, delim); // split command by whitespace 
     while(token != NULL){
         // char* clean_token = malloc(strlen(token)+1);
