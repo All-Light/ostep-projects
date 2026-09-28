@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "request.h"
 #include "io_helper.h"
+#include "queing.h"
 
 char default_root[] = ".";
 
