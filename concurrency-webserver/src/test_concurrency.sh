@@ -6,4 +6,5 @@
 ./wclient localhost 8003 /cgi/spin?6 &
 ./wclient localhost 8003 /cgi/spin?3 &
 ./wclient localhost 8003 /cgi/spin?1 &
+./wclient localhost 8003 /cgi/spin?7 &
 ./wclient localhost 8003 /cgi/spin?4 &
