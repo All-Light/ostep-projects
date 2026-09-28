@@ -2,18 +2,19 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 // queue based on https://www.geeksforgeeks.org/c/queue-in-c/
-#define MAX_SIZE 100
 
 typedef struct 
 {
-	int items[MAX_SIZE];
+	int* connection_fds;
+	int buffer_size;
 	int front;
 	int rear;
 } Queue;
 
-void initializeQueue(Queue *q);
+void initializeQueue(Queue *q, size_t buffer);
 
 bool isEmpty(Queue *q);
 

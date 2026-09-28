@@ -1,9 +1,23 @@
 #include "queing.h"
 // queue based on https://www.geeksforgeeks.org/c/queue-in-c/
 
-void initializeQueue(Queue *q){
+void initializeQueue(Queue *q, size_t buffer){
+    if(buffer < 1){
+        printf("Could not allocate buffer of size 0\n");
+        return;
+    }
+    q->connection_fds = malloc(buffer*sizeof(int));
+    if(q->connection_fds == NULL){
+        printf("Could not allocate buffer\n");
+        exit(1);
+    }
+    q->buffer_size = buffer;
     q->front = -1;
     q->rear = 0;
+}
+
+void destroyQueue(Queue *q){
+    free(q->connection_fds);
 }
 
 bool isEmpty(Queue *q){
@@ -11,7 +25,7 @@ bool isEmpty(Queue *q){
 }
 
 bool isFull(Queue *q){
-    return (q->rear == MAX_SIZE);
+    return (q->rear == q->buffer_size);
 }
 
 // Add a new value to the end of the queue
@@ -20,7 +34,7 @@ void enqueue(Queue *q, int value){
         printf("Request queue is full!\n");
         return;
     }
-    q->items[q->rear] = value;
+    q->connection_fds[q->rear] = value;
     q->rear++;
 }
 
@@ -39,7 +53,7 @@ int peek(Queue *q){
         printf("Queue is empty!\n");
         return -1;
     }
-    return q->items[q->front+1];
+    return q->connection_fds[q->front+1];
 }
 
 void printQueue(Queue *q){
@@ -49,7 +63,7 @@ void printQueue(Queue *q){
     }
     printf("Current Queue: ");
     for (int i = q->front + 1; i < q->rear; i++){
-        printf("%d ", q->items[i]);
+        printf("%d ", q->connection_fds[i]);
     }
     printf("\n");
 }
