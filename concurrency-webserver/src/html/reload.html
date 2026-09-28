@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>1DT044 continuous image reload test</title>
+  <style>
+    body { max-width: 52rem; margin: 2rem auto; padding: 0 1rem; font: 18px/1.5 sans-serif; }
+    code { background: #eee; padding: .1rem .25rem; }
+    .concurrency-gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; }
+    .concurrency-gallery img { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: cover; background: #eee; }
+  </style>
+</head>
+<body>
+  <h1>Continuous image reload test</h1>
+  <p>This page repeatedly requests all 15 images in parallel using <code>cache: 'no-store'</code>. Close the page or return to the <a href="index.html">main test page</a> to stop the requests.</p>
+
+  <div class="concurrency-gallery">
+    <img data-src="images/image1.jpg" alt="Repeated request test image 1">
+    <img data-src="images/image2.jpg" alt="Repeated request test image 2">
+    <img data-src="images/image3.jpg" alt="Repeated request test image 3">
+    <img data-src="images/image4.jpg" alt="Repeated request test image 4">
+    <img data-src="images/image5.jpg" alt="Repeated request test image 5">
+    <img data-src="images/image6.jpg" alt="Repeated request test image 6">
+    <img data-src="images/image7.jpg" alt="Repeated request test image 7">
+    <img data-src="images/image8.jpg" alt="Repeated request test image 8">
+    <img data-src="images/image9.jpg" alt="Repeated request test image 9">
+    <img data-src="images/image10.jpg" alt="Repeated request test image 10">
+    <img data-src="images/image11.jpg" alt="Repeated request test image 11">
+    <img data-src="images/image12.jpg" alt="Repeated request test image 12">
+    <img data-src="images/image13.jpg" alt="Repeated request test image 13">
+    <img data-src="images/image14.jpg" alt="Repeated request test image 14">
+    <img data-src="images/image15.jpg" alt="Repeated request test image 15">
+  </div>
+
+  <script>
+    const images = [...document.querySelectorAll('.concurrency-gallery img[data-src]')];
+    const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+    async function reloadImage(image) {
+      const response = await fetch(image.dataset.src, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`Image request failed: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const previousUrl = image.dataset.objectUrl;
+      const nextUrl = URL.createObjectURL(blob);
+      image.src = nextUrl;
+      image.dataset.objectUrl = nextUrl;
+
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+    }
+
+    async function reloadContinuously() {
+      while (true) {
+        await Promise.allSettled(images.map(reloadImage));
+        await delay(250);
+      }
+    }
+
+    reloadContinuously();
+  </script>
+</body>
+</html>

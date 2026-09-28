@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>1DT044 web server test page</title>
+  <style>
+    body { max-width: 52rem; margin: 2rem auto; padding: 0 1rem; font: 18px/1.5 sans-serif; }
+    img { display: block; max-width: 32rem; width: 100%; margin: .5rem 0 1.5rem; }
+    code { background: #eee; padding: .1rem .25rem; }
+    .concurrency-gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; }
+    .concurrency-gallery img { max-width: none; margin: 0; aspect-ratio: 3 / 2; object-fit: cover; background: #eee; }
+  </style>
+</head>
+<body>
+  <h1>Welcome to the web server test page</h1>
+  <p>If you can read this, your server returned an HTML file.</p>
+
+  <h2>Images</h2>
+  <p>There should be a penguin and a server here (a JPEG file):</p>
+  <img src="images/penguin-server.jpg" alt="A penguin beside a server">
+  <p>There should be three colored gears here (a GIF file):</p>
+  <img src="images/gears.gif" alt="Three colored gears">
+
+  <h2>Links to test</h2>
+  <ul>
+    <li><a href="about.html">A second HTML page</a> should load.</li>
+    <li><a href="level-one/level-two/deep.html">A page two directory levels down</a> should load.</li>
+    <li><a href="files/message.txt">A plain-text file</a> should display as text.</li>
+    <li><a href="does-not-exist.html">A missing page</a> should produce a not-found error.</li>
+    <li><a href="cgi/spin?1">Run <code>spin</code> for one second</a>; the response should say that it spun for about 1 second.</li>
+    <li><a href="cgi/spin?3">Run <code>spin</code> for three seconds</a>; this response should take about 3 seconds.</li>
+  </ul>
+
+  <h2>Parallel image request test</h2>
+  <p>All 15 images below should load. They use ordinary image requests, so the browser may cache them on subsequent visits.</p>
+  <p><a href="reload.html">Open the continuous image reload test</a> to repeatedly request all 15 images without using the browser's cache.</p>
+  <div class="concurrency-gallery">
+    <img src="images/image1.jpg" alt="Parallel request test image 1">
+    <img src="images/image2.jpg" alt="Parallel request test image 2">
+    <img src="images/image3.jpg" alt="Parallel request test image 3">
+    <img src="images/image4.jpg" alt="Parallel request test image 4">
+    <img src="images/image5.jpg" alt="Parallel request test image 5">
+    <img src="images/image6.jpg" alt="Parallel request test image 6">
+    <img src="images/image7.jpg" alt="Parallel request test image 7">
+    <img src="images/image8.jpg" alt="Parallel request test image 8">
+    <img src="images/image9.jpg" alt="Parallel request test image 9">
+    <img src="images/image10.jpg" alt="Parallel request test image 10">
+    <img src="images/image11.jpg" alt="Parallel request test image 11">
+    <img src="images/image12.jpg" alt="Parallel request test image 12">
+    <img src="images/image13.jpg" alt="Parallel request test image 13">
+    <img src="images/image14.jpg" alt="Parallel request test image 14">
+    <img src="images/image15.jpg" alt="Parallel request test image 15">
+  </div>
+
+</body>
+</html>

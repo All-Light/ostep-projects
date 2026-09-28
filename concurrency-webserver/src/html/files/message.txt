@@ -1,0 +1,2 @@
+This is a plain-text test file served by the 1DT044 web server.
+If this sentence appears as plain text, the request worked.
