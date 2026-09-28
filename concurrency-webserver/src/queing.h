@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 // queue based on https://www.geeksforgeeks.org/c/queue-in-c/
 
@@ -16,9 +17,13 @@ typedef struct
 
 void initializeQueue(Queue *q, size_t buffer);
 
+void destroyQueue(Queue *q);
+
 bool isEmpty(Queue *q);
 
 bool isFull(Queue *q);
+
+//static void resetQueue(Queue *q);
 
 void enqueue(Queue *q, int value);
 

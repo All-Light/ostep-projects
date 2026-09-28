@@ -10,7 +10,8 @@ char default_root[] = ".";
 //
 // ./wserver [-d <basedir>] [-p <portnum>] 
 // prompt> ./wserver [-d basedir] [-p port] [-t threads] [-b buffers] [-s schedalg]
-// 
+// ./wserver -d ./html/ -p 8003 -t 1 -b 5 
+//
 int main(int argc, char *argv[]) {
     int c;
     char *root_dir = default_root;
@@ -62,8 +63,7 @@ int main(int argc, char *argv[]) {
 
 	Queue q;
 	initializeQueue(&q, buffer);
-	enqueue(&q, 10);
-	printQueue(&q);
+
 	// create threads
 
 
@@ -78,6 +78,7 @@ int main(int argc, char *argv[]) {
 		request_handle(conn_fd);
 		close_or_die(conn_fd);
     }
+	destroyQueue(&q);
     return 0;
 }
 
