@@ -34,6 +34,7 @@ static void* worker(void* arg){
 		dequeue(q);
 		printf("thread received conn_fd %d\n", conn_fd);
 		pthread_mutex_unlock(&queue_lock);
+		pthread_cond_signal(&queue_cond); // signal to other threads to wake and check the queue 
 
 		request_handle(conn_fd);
 		close_or_die(conn_fd);
