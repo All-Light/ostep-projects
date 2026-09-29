@@ -6,6 +6,17 @@
 // Hopefully this is not a problem ... :)
 //
 
+// FIXME: This shouldn't be duplicated...
+static double get_wall_seconds() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  double seconds = tv.tv_sec + (double)tv.tv_usec / 1000000;
+  return seconds;
+}
+
+
+
+
 #define MAXBUF (8192)
 
 void request_error(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg) {
@@ -142,16 +153,20 @@ void request_serve_static(int fd, char *filename, int filesize) {
 }
 
 // handle a request
-void request_handle(int fd) {
+void request_handle(int fd, int log_fd, double start_time, int tid) {
     int is_static;
     struct stat sbuf;
-    char buf[MAXBUF], method[MAXBUF], uri[MAXBUF], version[MAXBUF];
+    char buf[MAXBUF], log_buf[MAXBUF], method[MAXBUF], uri[MAXBUF], version[MAXBUF];
     char filename[MAXBUF], cgiargs[MAXBUF];
-    
+
     readline_or_die(fd, buf, MAXBUF);
     sscanf(buf, "%s %s %s", method, uri, version);
     printf("method:%s uri:%s version:%s\n", method, uri, version);
-    
+    if(log_fd != -1){
+        sprintf(log_buf, "%3fs [Thread %d] Started - request: %s %s\n", get_wall_seconds() - start_time, tid, method, uri);
+        int nbytes = strlen(log_buf)*sizeof(char);
+        write(log_fd, log_buf,nbytes);
+    }
     if (strcasecmp(method, "GET")) {
 	request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
 	return;

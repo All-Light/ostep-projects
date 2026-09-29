@@ -1,42 +1,76 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <sys/stat.h>
+#include <sys/time.h>
 #include "request.h"
 #include "io_helper.h"
 #include "queing.h"
 
+
+#define MAXBUF (8192) // shouldnt duplicate...
+
 char default_root[] = ".";
+
+
+static double get_wall_seconds() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  double seconds = tv.tv_sec + (double)tv.tv_usec / 1000000;
+  return seconds;
+}
+
 
 typedef struct{
 	int tid;
+	int file_d; 
 	Queue** q;
+	double program_start_time;
 } connection_data;
 
 
 static pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
 
+static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void append_to_log(int file_d, char* value){
+	pthread_mutex_lock(&log_lock);
+	int nbytes = strlen(value)*sizeof(char);
+	write(file_d, value, nbytes);
+	pthread_mutex_unlock(&log_lock);
+}
+
+
+
 static void* worker(void* arg){
 	connection_data* data = (connection_data*) arg;
 	Queue* q = *data->q;
 	pid_t tid = data->tid; // debug
+	double start_time = data->program_start_time;
+	int file_d = data->file_d;
+	//bool logging_enabled = file_d == -1;
+
 	while(1){
 		pthread_mutex_lock(&queue_lock);
 		while(isEmpty(q)){
 			pthread_cond_wait(&queue_cond, &queue_lock);
 		}
 		printf("Woke up as thread %d!\n", tid);
+		//char text_buffer[100];
+		//char* received = sprintf("")
+		//append_to_log(file_d, "")
 		int conn_fd = peek(q);
 		if(conn_fd == -1) {
 			printf("received invalid conn_fd %d\n",conn_fd);
 			return NULL;
 		}
 		dequeue(q);
-		printf("thread received conn_fd %d\n", conn_fd);
+		//printf("thread received conn_fd %d\n", conn_fd);
 		pthread_mutex_unlock(&queue_lock);
 		pthread_cond_signal(&queue_cond); // signal to other threads to wake and check the queue 
 
-		request_handle(conn_fd);
+		request_handle(conn_fd, file_d, start_time, tid);
 		close_or_die(conn_fd);
 	}
 
@@ -46,17 +80,24 @@ static void* worker(void* arg){
 
 //
 // ./wserver [-d <basedir>] [-p <portnum>] 
-// prompt> ./wserver [-d basedir] [-p port] [-t threads] [-b buffers] [-s schedalg]
-// ./wserver -d ./html/ -p 8003 -t 1 -b 5 
+// prompt> ./wserver [-d basedir] [-p port] [-t threads] [-b buffers] [-l log_file]
+// ./wserver -d ./html/ -p 8003 -t 1 -b 5  -l logs.txt
 //
+const char* usage_str = "usage: wserver [-d basedir] [-p port] [-t threads] [-b buffers] [-l logfile]\n";
+
 int main(int argc, char* argv[]) {
     int c;
     char *root_dir = default_root;
     int port = 10000;
 	size_t num_threads = 0;
 	size_t buffer = 0;
-    
-    while ((c = getopt(argc, argv, "d:p:t:b:")) != -1){
+	char log_file[50]; // magic numbers...
+	bool logging_enabled = false;
+	struct stat path_stat;
+    char buf[MAXBUF], log_buf[MAXBUF];
+
+
+    while ((c = getopt(argc, argv, "d:p:t:b:l:")) != -1){
 		switch (c) {
 		case 'd':
 			root_dir = optarg;
@@ -67,28 +108,57 @@ int main(int argc, char* argv[]) {
 		case 't':
 			num_threads = atoi(optarg);
 			if(num_threads < 1) { // sanity check
-				fprintf(stderr, "usage: wserver [-d basedir] [-p port] [-t threads] [-b buffers]\n");
+				fprintf(stderr, usage_str);
 				exit(1);
 			}			
 			break;
 		case 'b':
 			buffer = atoi(optarg);
 			if(buffer < 1) { // sanity check
-				fprintf(stderr, "usage: wserver [-d basedir] [-p port] [-t threads] [-b buffers]\n");
+				fprintf(stderr, usage_str);
 				exit(1);
 			}
 			break;
+		case 'l':
+			if(stat(optarg, &path_stat) == 0){ // check that this file is accessible and exists
+				if(S_ISREG(path_stat.st_mode)){ // check that its a regular file (not a directory)
+					logging_enabled = true;
+					strcpy(log_file, optarg);
+					break;
+				}
+				// its not a "file"
+				fprintf(stderr, "You specified something other than a file as log file.");
+				exit(1);
+			}
+			if(errno == ENOENT){ // file is not created
+				logging_enabled = true;
+				strcpy(log_file, optarg);
+				break;
+			}
+
+			fprintf(stderr, "Could not access log file.");
+			exit(1);
+			break;
 		default:
-			fprintf(stderr, "usage: wserver [-d basedir] [-p port] [-t threads] [-b buffers]\n");
+			fprintf(stderr, usage_str);
 			exit(1);
 		}
 	}
 	// sanity check
 	if(num_threads == 0 || buffer == 0){
-		fprintf(stderr, "usage: wserver [-d basedir] [-p port] [-t threads] [-b buffers]\n");
+		fprintf(stderr, usage_str);
 		exit(1);
 	}
-
+	int file_d = -1;
+	if(logging_enabled){
+		file_d = open(log_file, O_WRONLY | O_CREAT | O_APPEND, 0644); // owner: read+write, group: read-only, others: read-only 
+		if(file_d == -1){
+			perror("open failed");
+			exit(1);
+		}
+		char new_line[] = "\n";
+		write(file_d, new_line, strlen(new_line)*sizeof(char));
+	}
 
     // run out of this directory
     chdir_or_die(root_dir);
@@ -106,21 +176,40 @@ int main(int argc, char* argv[]) {
 		perror("malloc");
 		exit(1);
 	}
+	double start_time = get_wall_seconds();
 	connection_data* thread_data = malloc(num_threads*sizeof(thread_data));
     for (int i = 0; i < num_threads; i++) {
 		thread_data[i].q = &q;
 		thread_data[i].tid = i;
+		thread_data[i].file_d = file_d;
+		thread_data[i].program_start_time = start_time;
         pthread_create(&threads[i], NULL, worker, (void*)&thread_data[i]);
     }
 
     // now, get to work
     int listen_fd = open_listen_fd_or_die(port);
+	char method[MAXBUF], uri[MAXBUF], peak_buf[MAXBUF];//, version[MAXBUF];
     while (1) {
 		struct sockaddr_in client_addr;
 		int client_len = sizeof(client_addr);
 		int conn_fd = accept_or_die(listen_fd, (sockaddr_t *) &client_addr, (socklen_t *) &client_len);
 		// enqueue this connection and wake threads
 		//printf("enqueing conn_fd = %d\n", conn_fd);
+		if(logging_enabled){
+			// we need to get method and URI to log it
+
+			ssize_t bytes_peeked = recv(conn_fd, peak_buf, sizeof(peak_buf)-1, MSG_PEEK);
+			if(bytes_peeked > 0){
+				peak_buf[bytes_peeked] = '\0';
+				//printf("Peeked data: %s\n", peak_buf);
+
+				sscanf(peak_buf, "%s %s", method, uri);
+				sprintf(log_buf, "%3fs [Thread Main] Arrived - request: %s %s\n", get_wall_seconds() - start_time, method, uri);
+				int nbytes = strlen(log_buf)*sizeof(char);
+				write(file_d, log_buf, nbytes);
+			}
+		}
+
 		pthread_mutex_lock(&queue_lock);
 		enqueue(q, conn_fd);
 		pthread_mutex_unlock(&queue_lock);
@@ -133,6 +222,7 @@ int main(int argc, char* argv[]) {
 
 	pthread_mutex_destroy(&queue_lock);
 	destroyQueue(q);
+	close(file_d);
 	free(thread_data);
 	free(q);
     return 0;
