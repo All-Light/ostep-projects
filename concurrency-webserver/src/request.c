@@ -153,7 +153,7 @@ void request_serve_static(int fd, char *filename, int filesize) {
 }
 
 // handle a request
-void request_handle(int fd, int log_fd, double start_time, int tid) {
+void request_handle(int fd, int log_fd, double program_start_time, double task_start_time, int tid, pthread_mutex_t log_lock) {
     int is_static;
     struct stat sbuf;
     char buf[MAXBUF], log_buf[MAXBUF], method[MAXBUF], uri[MAXBUF], version[MAXBUF];
@@ -163,33 +163,42 @@ void request_handle(int fd, int log_fd, double start_time, int tid) {
     sscanf(buf, "%s %s %s", method, uri, version);
     printf("method:%s uri:%s version:%s\n", method, uri, version);
     if(log_fd != -1){
-        sprintf(log_buf, "%3fs [Thread %d] Started - request: %s %s\n", get_wall_seconds() - start_time, tid, method, uri);
+        sprintf(log_buf, "%3fs [Thread %d] Started - request: %s %s (%3fs waiting)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
         int nbytes = strlen(log_buf)*sizeof(char);
-        write(log_fd, log_buf,nbytes);
+        pthread_mutex_lock(&log_lock);
+        write(log_fd, log_buf, nbytes);
+        pthread_mutex_unlock(&log_lock);
     }
     if (strcasecmp(method, "GET")) {
-	request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
-	return;
+        request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
+        return;
     }
     request_read_headers(fd);
     
     is_static = request_parse_uri(uri, filename, cgiargs);
     if (stat(filename, &sbuf) < 0) {
-	request_error(fd, filename, "404", "Not found", "server could not find this file");
-	return;
+        request_error(fd, filename, "404", "Not found", "server could not find this file");
+        return;
     }
     
     if (is_static) {
-	if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
-	    request_error(fd, filename, "403", "Forbidden", "server could not read this file");
-	    return;
-	}
-	request_serve_static(fd, filename, sbuf.st_size);
-    } else {
-	if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
-	    request_error(fd, filename, "403", "Forbidden", "server could not run this CGI program");
-	    return;
-	}
-	request_serve_dynamic(fd, filename, cgiargs);
+        if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
+            request_error(fd, filename, "403", "Forbidden", "server could not read this file");
+            return;
+        }
+        request_serve_static(fd, filename, sbuf.st_size);
+    } 
+    else {
+        if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
+            request_error(fd, filename, "403", "Forbidden", "server could not run this CGI program");
+            return;
+        }
+        request_serve_dynamic(fd, filename, cgiargs);
     }
+    if(log_fd != -1){
+        sprintf(log_buf, "%3fs [Thread %d] Completed - request: %s %s (%3fs total)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
+        int nbytes = strlen(log_buf)*sizeof(char);
+        pthread_mutex_lock(&log_lock);
+        write(log_fd, log_buf, nbytes);
+        pthread_mutex_unlock(&log_lock);    }
 }

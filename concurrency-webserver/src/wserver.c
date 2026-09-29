@@ -34,12 +34,12 @@ static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
 
 static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
 
-void append_to_log(int file_d, char* value){
-	pthread_mutex_lock(&log_lock);
-	int nbytes = strlen(value)*sizeof(char);
-	write(file_d, value, nbytes);
-	pthread_mutex_unlock(&log_lock);
-}
+// void append_to_log(int file_d, char* value){
+// 	pthread_mutex_lock(&log_lock);
+// 	int nbytes = strlen(value)*sizeof(char);
+// 	write(file_d, value, nbytes);
+// 	pthread_mutex_unlock(&log_lock);
+// }
 
 
 
@@ -47,7 +47,7 @@ static void* worker(void* arg){
 	connection_data* data = (connection_data*) arg;
 	Queue* q = *data->q;
 	pid_t tid = data->tid; // debug
-	double start_time = data->program_start_time;
+	double program_start_time = data->program_start_time;
 	int file_d = data->file_d;
 	//bool logging_enabled = file_d == -1;
 
@@ -56,11 +56,14 @@ static void* worker(void* arg){
 		while(isEmpty(q)){
 			pthread_cond_wait(&queue_cond, &queue_lock);
 		}
-		printf("Woke up as thread %d!\n", tid);
+		//printf("Woke up as thread %d!\n", tid);
 		//char text_buffer[100];
 		//char* received = sprintf("")
 		//append_to_log(file_d, "")
-		int conn_fd = peek(q);
+		QueueItem item = *peek(q);
+		int conn_fd = item.connection_fd;
+		double task_start_time = item.task_start_time;
+
 		if(conn_fd == -1) {
 			printf("received invalid conn_fd %d\n",conn_fd);
 			return NULL;
@@ -70,7 +73,7 @@ static void* worker(void* arg){
 		pthread_mutex_unlock(&queue_lock);
 		pthread_cond_signal(&queue_cond); // signal to other threads to wake and check the queue 
 
-		request_handle(conn_fd, file_d, start_time, tid);
+		request_handle(conn_fd, file_d, program_start_time, task_start_time, tid, log_lock);
 		close_or_die(conn_fd);
 	}
 
@@ -157,7 +160,9 @@ int main(int argc, char* argv[]) {
 			exit(1);
 		}
 		char new_line[] = "\n";
+		pthread_mutex_lock(&log_lock);
 		write(file_d, new_line, strlen(new_line)*sizeof(char));
+		pthread_mutex_unlock(&log_lock);
 	}
 
     // run out of this directory
@@ -206,12 +211,17 @@ int main(int argc, char* argv[]) {
 				sscanf(peak_buf, "%s %s", method, uri);
 				sprintf(log_buf, "%3fs [Thread Main] Arrived - request: %s %s\n", get_wall_seconds() - start_time, method, uri);
 				int nbytes = strlen(log_buf)*sizeof(char);
+				pthread_mutex_lock(&log_lock);
 				write(file_d, log_buf, nbytes);
+				pthread_mutex_unlock(&log_lock);
 			}
 		}
-
+		int task_start_time = get_wall_seconds();
+		QueueItem item; // fixme: Should be malloced?
+		item.connection_fd = conn_fd;
+		item.task_start_time = task_start_time; 
 		pthread_mutex_lock(&queue_lock);
-		enqueue(q, conn_fd);
+		enqueue(q, &item);
 		pthread_mutex_unlock(&queue_lock);
 
 		pthread_cond_signal(&queue_cond);

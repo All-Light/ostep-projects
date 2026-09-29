@@ -8,8 +8,8 @@ void initializeQueue(Queue *q, size_t buffer){
         printf("Could not allocate buffer of size 0\n");
         return;
     }
-    q->connection_fds = malloc(buffer*sizeof(int));
-    if(q->connection_fds == NULL){
+    q->items = malloc(buffer*sizeof(QueueItem));
+    if(q->items == NULL){
         printf("Could not allocate buffer\n");
         exit(1);
     }
@@ -19,7 +19,7 @@ void initializeQueue(Queue *q, size_t buffer){
 }
 
 void destroyQueue(Queue *q){
-    free(q->connection_fds);
+    free(q->items);
 }
 
 
@@ -34,7 +34,7 @@ static void resetQueue(Queue *q){
     // nr items is less than buffer size
     printf("reset queue\n");
     // shift entire array to start
-    memmove(&q->connection_fds[0], &q->connection_fds[q->front], nr_items*sizeof(int));
+    memmove(&q->items[0], &q->items[q->front], nr_items*sizeof(int));
     q->front = -1;
     q->rear = nr_items-1;
 }
@@ -58,12 +58,12 @@ bool isFull(Queue *q){
 }
 
 // Add a new value to the end of the queue
-void enqueue(Queue *q, int value){
+void enqueue(Queue *q, QueueItem *item){
     if(isFull(q)){
         if(DEBUG) printf("Request queue is full!\n");
         return;
     }
-    q->connection_fds[q->rear] = value;
+    q->items[q->rear] = *item;
     q->rear++;
 }
 
@@ -77,12 +77,12 @@ void dequeue(Queue *q){
     q->front++;
 }
 
-int peek(Queue *q){
+QueueItem* peek(Queue *q){
     if(isEmpty(q)){
         if(DEBUG) printf("Queue is empty!\n");
-        return -1;
+        return NULL;
     }
-    return q->connection_fds[q->front+1];
+    return &q->items[q->front+1];
 }
 
 void printQueue(Queue *q){
@@ -93,7 +93,7 @@ void printQueue(Queue *q){
     }
     printf("Current Queue: ");
     for (int i = q->front + 1; i < q->rear; i++){
-        printf(" %d", q->connection_fds[i]);
+        printf(" %d", q->items[i].connection_fd);
     }
     printf("\n");
 }

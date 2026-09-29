@@ -7,9 +7,15 @@
 
 // queue based on https://www.geeksforgeeks.org/c/queue-in-c/
 
+typedef struct {
+	int connection_fd;
+	double task_start_time;
+} QueueItem;
+
+
 typedef struct 
 {
-	int* connection_fds;
+	QueueItem* items;
 	int buffer_size;
 	int front;
 	int rear;
@@ -25,11 +31,11 @@ bool isFull(Queue *q);
 
 //static void resetQueue(Queue *q);
 
-void enqueue(Queue *q, int value);
+void enqueue(Queue *q, QueueItem *item);
 
 void dequeue(Queue *q);
 
-int peek(Queue *q);
+QueueItem *peek(Queue *q);
 
 void printQueue(Queue *q);
 
