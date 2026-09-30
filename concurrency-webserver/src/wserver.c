@@ -204,22 +204,25 @@ int main(int argc, char* argv[]) {
 		int client_len = sizeof(client_addr);
 		pthread_mutex_lock(&queue_lock);
 		while(isFull(q)){
-			if(DEBUG) printf("main thread waiting...\n");
+			//if(DEBUG) printf("main thread waiting...\n");
 			pthread_cond_wait(&queue_cond, &queue_lock);
+			//if(DEBUG) printf("main thread woke up\n");
 		}
-		if(DEBUG) printf("main thread woke up\n");
-		int conn_fd = accept_or_die(listen_fd, (sockaddr_t *) &client_addr, (socklen_t *) &client_len);
-		if(DEBUG) printf("main thread received connection fd=%d\n", conn_fd);
-		if(logging_enabled){
-			// we need to get method and URI to log it
+		// the queue is not full so we will listen for new connections
 
+		// unlock mutex so threads can work while we wait
+		pthread_mutex_unlock(&queue_lock);
+		int conn_fd = accept_or_die(listen_fd, (sockaddr_t *) &client_addr, (socklen_t *) &client_len);
+		if(logging_enabled){
+			// we need to peek at method and URI to log it
 			ssize_t bytes_peeked = recv(conn_fd, peak_buf, sizeof(peak_buf)-1, MSG_PEEK);
 			if(bytes_peeked > 0){
 				peak_buf[bytes_peeked] = '\0';
-				//printf("Peeked data: %s\n", peak_buf);
 
 				sscanf(peak_buf, "%s %s", method, uri);
 				sprintf(log_buf, "%3fs [Thread Main] Arrived - request: %s %s\n", get_wall_seconds() - start_time, method, uri);
+				if(DEBUG) printf(log_buf);
+
 				int nbytes = strlen(log_buf)*sizeof(char);
 				pthread_mutex_lock(&log_lock);
 				write(file_d, log_buf, nbytes);
@@ -231,7 +234,7 @@ int main(int argc, char* argv[]) {
 		item.connection_fd = conn_fd;
 		item.task_start_time = task_start_time; 
 
-		//pthread_mutex_lock(&queue_lock);
+		pthread_mutex_lock(&queue_lock);
 		// enqueue this connection and wake threads
 		enqueue(q, &item);
 		pthread_mutex_unlock(&queue_lock);
