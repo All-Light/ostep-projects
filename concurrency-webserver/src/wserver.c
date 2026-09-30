@@ -3,12 +3,14 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <signal.h>
 #include "request.h"
 #include "io_helper.h"
 #include "queing.h"
 
 
 #define MAXBUF (8192) // shouldnt duplicate...
+#define DEBUG 1
 
 char default_root[] = ".";
 
@@ -56,7 +58,8 @@ static void* worker(void* arg){
 		while(isEmpty(q)){
 			pthread_cond_wait(&queue_cond, &queue_lock);
 		}
-		//printf("Woke up as thread %d!\n", tid);
+		if(DEBUG) printf("Woke up as thread %d!\n", tid);
+		if(DEBUG) printQueue(q);
 		//char text_buffer[100];
 		//char* received = sprintf("")
 		//append_to_log(file_d, "")
@@ -69,9 +72,9 @@ static void* worker(void* arg){
 			return NULL;
 		}
 		dequeue(q);
-		//printf("thread received conn_fd %d\n", conn_fd);
+		if(DEBUG) printf("thread received conn_fd %d\n", conn_fd);
 		pthread_mutex_unlock(&queue_lock);
-		pthread_cond_signal(&queue_cond); // signal to other threads to wake and check the queue 
+		pthread_cond_signal(&queue_cond); // signal to other threads to wake and check the queue and for main thread to add new items
 
 		request_handle(conn_fd, file_d, program_start_time, task_start_time, tid, log_lock);
 		close_or_die(conn_fd);
@@ -92,8 +95,8 @@ int main(int argc, char* argv[]) {
     int c;
     char *root_dir = default_root;
     int port = 10000;
-	size_t num_threads = 0;
-	size_t buffer = 0;
+	size_t num_threads = 1;
+	size_t buffer = 1;
 	char log_file[50]; // magic numbers...
 	bool logging_enabled = false;
 	struct stat path_stat;
@@ -148,10 +151,12 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	// sanity check
-	if(num_threads == 0 || buffer == 0){
+	if(num_threads < 1 || buffer < 1){
 		fprintf(stderr, usage_str);
 		exit(1);
 	}
+	signal(SIGPIPE, SIG_IGN); // ignore sigpipe 
+
 	int file_d = -1;
 	if(logging_enabled){
 		file_d = open(log_file, O_WRONLY | O_CREAT | O_APPEND, 0644); // owner: read+write, group: read-only, others: read-only 
@@ -197,9 +202,14 @@ int main(int argc, char* argv[]) {
     while (1) {
 		struct sockaddr_in client_addr;
 		int client_len = sizeof(client_addr);
+		pthread_mutex_lock(&queue_lock);
+		while(isFull(q)){
+			if(DEBUG) printf("main thread waiting...\n");
+			pthread_cond_wait(&queue_cond, &queue_lock);
+		}
+		if(DEBUG) printf("main thread woke up\n");
 		int conn_fd = accept_or_die(listen_fd, (sockaddr_t *) &client_addr, (socklen_t *) &client_len);
-		// enqueue this connection and wake threads
-		//printf("enqueing conn_fd = %d\n", conn_fd);
+		if(DEBUG) printf("main thread received connection fd=%d\n", conn_fd);
 		if(logging_enabled){
 			// we need to get method and URI to log it
 
@@ -220,12 +230,13 @@ int main(int argc, char* argv[]) {
 		QueueItem item; // fixme: Should be malloced?
 		item.connection_fd = conn_fd;
 		item.task_start_time = task_start_time; 
-		pthread_mutex_lock(&queue_lock);
+
+		//pthread_mutex_lock(&queue_lock);
+		// enqueue this connection and wake threads
 		enqueue(q, &item);
 		pthread_mutex_unlock(&queue_lock);
-
 		pthread_cond_signal(&queue_cond);
-
+		if(DEBUG) printf("main thread finished work\n");
 		//request_handle(conn_fd);
 		//close_or_die(conn_fd);
     }
