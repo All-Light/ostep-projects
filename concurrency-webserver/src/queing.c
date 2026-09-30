@@ -34,7 +34,7 @@ static void resetQueue(Queue *q){
     // nr items is less than buffer size
     printf("reset queue\n");
     // shift entire array to start
-    memmove(&q->items[0], &q->items[q->front], nr_items*sizeof(int));
+    memmove(&q->items[0], &q->items[q->front+1], nr_items*sizeof(QueueItem));
     q->front = -1;
     q->rear = nr_items-1;
 }
@@ -50,7 +50,7 @@ bool isFull(Queue *q){
     //printf("isFull buffer size: %d\n", q->buffer_size);
     //printf("isFull q->front: %d\n", q->front);
     //printf("isFull q->rear: %d\n", q->rear);
-    if(q->rear == q->buffer_size){
+    if(q->front != -1 && q->rear == q->buffer_size){ // the queue doesnt fill the entire buffer, shift it
         resetQueue(q);
     }
     // if its still equal we are genuinely full
