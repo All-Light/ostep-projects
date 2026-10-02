@@ -46,7 +46,7 @@ typedef struct sockaddr sockaddr_t;
 #define read_or_die(fd, buf, count) \
     ({ ssize_t rc = read(fd, buf, count); assert(rc >= 0); rc; })
 #define write_or_die(fd, buf, count) \
-    ({ ssize_t rc = write(fd, buf, count); assert(rc >= 0); rc; })
+    ({ ssize_t rc = write(fd, buf, count); assert(errno == EPIPE || rc >= 0); rc; })  // ignore EPIPE error
 #define lseek_or_die(fd, offset, whence) \
     ({ off_t rc = lseek(fd, offset, whence); assert(rc >= 0); rc; })
 #define close_or_die(fd) \
