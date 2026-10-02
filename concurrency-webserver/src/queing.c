@@ -1,7 +1,7 @@
 #include "queing.h"
 // queue based on https://www.geeksforgeeks.org/c/queue-in-c/
 
-#define DEBUG 1
+#define DEBUG 0
 
 void initializeQueue(Queue *q, size_t buffer){
     if(buffer < 1){
@@ -32,7 +32,7 @@ static void resetQueue(Queue *q){
         return; // queue is genuinely full
     }
     // nr items is less than buffer size
-    printf("reset queue\n");
+    
     // shift entire array to start
     memmove(&q->items[0], &q->items[q->front+1], nr_items*sizeof(QueueItem));
     q->front = -1;
