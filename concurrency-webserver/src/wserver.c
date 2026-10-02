@@ -10,7 +10,7 @@
 
 
 #define MAXBUF (8192) // shouldnt duplicate...
-#define DEBUG 1
+#define DEBUG 0
 
 char default_root[] = ".";
 
@@ -44,18 +44,37 @@ static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
 // }
 
 
-
 static void* worker(void* arg){
 	connection_data* data = (connection_data*) arg;
 	Queue* q = *data->q;
 	pid_t tid = data->tid; // debug
 	double program_start_time = data->program_start_time;
 	int file_d = data->file_d;
-	//bool logging_enabled = file_d == -1;
+	const int buffer_size = 10;
+	char log_buffer[buffer_size][MAX_STR_LEN];
+	unsigned int buffer_count = 0;
+	if(file_d == -1){
+		// we wont write to log file
+		buffer_count = -1;
+	}
 
+	//bool logging_enabled = file_d == -1;
 	while(1){
 		pthread_mutex_lock(&queue_lock);
 		while(isEmpty(q)){
+			// we are going to sleep this thread, let it flush the log buffer before
+			if(buffer_count > 0){
+				// flush buffer to file
+				pthread_mutex_lock(&log_lock);
+				for(int i=0; i < buffer_count; i++){
+					printf("wrote: %s", log_buffer[i]);
+					int nbytes = strlen(log_buffer[i])*sizeof(char);
+					write(file_d, log_buffer[i], nbytes);
+				}
+				fsync(file_d); // force actual write to disk
+				pthread_mutex_unlock(&log_lock);
+				buffer_count = 0;
+			}
 			pthread_cond_wait(&queue_cond, &queue_lock);
 		}
 		if(DEBUG) printf("Woke up as thread %d!\n", tid);
@@ -76,8 +95,21 @@ static void* worker(void* arg){
 		pthread_mutex_unlock(&queue_lock);
 		pthread_cond_signal(&queue_cond); // signal to other threads to wake and check the queue and for main thread to add new items
 
-		request_handle(conn_fd, file_d, program_start_time, task_start_time, tid, log_lock);
+		request_handle(conn_fd, buffer_size, log_buffer, &buffer_count, program_start_time, task_start_time, tid);
 		close_or_die(conn_fd);
+		if(buffer_count + 2 > buffer_size){
+			// flush buffer to file
+			pthread_mutex_lock(&log_lock);
+			for(int i=0; i < buffer_count; i++){
+				printf("wrote: %s", log_buffer[i]);
+				int nbytes = strlen(log_buffer[i])*sizeof(char);
+				write(file_d, log_buffer[i], nbytes);
+			}
+			fsync(file_d); // force actual write to disk
+			pthread_mutex_unlock(&log_lock);
+			buffer_count = 0;
+		}
+		// write to log file on condition
 	}
 
 	return NULL;
@@ -100,7 +132,8 @@ int main(int argc, char* argv[]) {
 	char log_file[50]; // magic numbers...
 	bool logging_enabled = false;
 	struct stat path_stat;
-    char buf[MAXBUF], log_buf[MAXBUF];
+    //char buf[MAXBUF],
+	char log_buf[MAXBUF];
 
 
     while ((c = getopt(argc, argv, "d:p:t:b:l:")) != -1){
@@ -157,26 +190,20 @@ int main(int argc, char* argv[]) {
 	}
 	signal(SIGPIPE, SIG_IGN); // ignore sigpipe 
 
-	int file_d = -1;
+	int main_log_file_d = -1;
 	if(logging_enabled){
-		file_d = open(log_file, O_WRONLY | O_CREAT | O_APPEND, 0644); // owner: read+write, group: read-only, others: read-only 
-		if(file_d == -1){
-			perror("open failed");
+		main_log_file_d = open(log_file, O_WRONLY | O_CREAT | O_APPEND, 0644); // owner: read+write, group: read-only, others: read-only 
+		if(main_log_file_d == -1){
+			perror("Could not open the log file from main thread.");
 			exit(1);
 		}
 		char new_line[] = "\n";
 		pthread_mutex_lock(&log_lock);
-		write(file_d, new_line, strlen(new_line)*sizeof(char));
+		write(main_log_file_d, new_line, strlen(new_line)*sizeof(char));
 		pthread_mutex_unlock(&log_lock);
 	}
 
-    // run out of this directory
-    chdir_or_die(root_dir);
-	//printf("Buffer size %ld\n", buffer);
-	//printf("We have %ld threads\n", num_threads);
-
 	// create queue
-
 	Queue* q = malloc(sizeof(Queue));
 	initializeQueue(q, buffer);
 
@@ -191,11 +218,23 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < num_threads; i++) {
 		thread_data[i].q = &q;
 		thread_data[i].tid = i;
-		thread_data[i].file_d = file_d;
+		if(strlen(log_file) > 0){
+			thread_data[i].file_d = open(log_file, O_WRONLY | O_CREAT | O_APPEND, 0644); // Instructions require each thread to open the log file themselves
+			if(thread_data[i].file_d == -1){
+				perror("Could not open the log file for thread.");
+				exit(1);
+			}
+		}
+		else{
+			thread_data[i].file_d = -1; // indicate that we have no file descriptor
+		}
 		thread_data[i].program_start_time = start_time;
         pthread_create(&threads[i], NULL, worker, (void*)&thread_data[i]);
     }
 
+    // run out of this directory
+    chdir_or_die(root_dir);
+	
     // now, get to work
     int listen_fd = open_listen_fd_or_die(port);
 	char method[MAXBUF], uri[MAXBUF], peak_buf[MAXBUF];//, version[MAXBUF];
@@ -225,7 +264,7 @@ int main(int argc, char* argv[]) {
 
 				int nbytes = strlen(log_buf)*sizeof(char);
 				pthread_mutex_lock(&log_lock);
-				write(file_d, log_buf, nbytes);
+				write(main_log_file_d, log_buf, nbytes);
 				pthread_mutex_unlock(&log_lock);
 			}
 		}
@@ -246,7 +285,11 @@ int main(int argc, char* argv[]) {
 
 	pthread_mutex_destroy(&queue_lock);
 	destroyQueue(q);
-	close(file_d);
+	close(main_log_file_d);
+	for (int i = 0; i < num_threads; i++) {
+		close(thread_data[i].file_d );
+	}
+
 	free(thread_data);
 	free(q);
     return 0;

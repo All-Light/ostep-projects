@@ -6,6 +6,9 @@
 // Hopefully this is not a problem ... :)
 //
 
+#define DEBUG 1
+
+
 // FIXME: This shouldn't be duplicated...
 static double get_wall_seconds() {
   struct timeval tv;
@@ -153,21 +156,24 @@ void request_serve_static(int fd, char *filename, int filesize) {
 }
 
 // handle a request
-void request_handle(int fd, int log_fd, double program_start_time, double task_start_time, int tid, pthread_mutex_t log_lock) {
+void request_handle(int fd, unsigned int buffer_size, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, double program_start_time, double task_start_time, int tid) {
     int is_static;
     struct stat sbuf;
     char buf[MAXBUF], log_buf[MAXBUF], method[MAXBUF], uri[MAXBUF], version[MAXBUF];
     char filename[MAXBUF], cgiargs[MAXBUF];
-
+    //printf("will read fd: %d\n",fd);
     readline_or_die(fd, buf, MAXBUF);
     sscanf(buf, "%s %s %s", method, uri, version);
-    printf("method:%s uri:%s version:%s\n", method, uri, version);
-    if(log_fd != -1){
-        sprintf(log_buf, "%3fs [Thread %d] Started - request: %s %s (%3fs waiting)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
-        int nbytes = strlen(log_buf)*sizeof(char);
-        pthread_mutex_lock(&log_lock);
-        write(log_fd, log_buf, nbytes);
-        pthread_mutex_unlock(&log_lock);
+    //printf("method:%s uri:%s version:%s\n", method, uri, version);
+    if(buffer_count != -1){
+        sprintf(log_buffer[*buffer_count], "%3fs [Thread %d] Started - request: %s %s (%3fs waiting)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
+        (*buffer_count)++;
+        // int nbytes = strlen(log_buf)*sizeof(char);
+        // if(DEBUG) printf(log_buf);
+
+        // pthread_mutex_lock(&log_lock);
+        // write(log_fd, log_buf, nbytes);
+        // pthread_mutex_unlock(&log_lock);
     }
     if (strcasecmp(method, "GET")) {
         request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
@@ -195,10 +201,13 @@ void request_handle(int fd, int log_fd, double program_start_time, double task_s
         }
         request_serve_dynamic(fd, filename, cgiargs);
     }
-    if(log_fd != -1){
-        sprintf(log_buf, "%3fs [Thread %d] Completed - request: %s %s (%3fs total)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
-        int nbytes = strlen(log_buf)*sizeof(char);
-        pthread_mutex_lock(&log_lock);
-        write(log_fd, log_buf, nbytes);
-        pthread_mutex_unlock(&log_lock);    }
+    if(buffer_count != -1){
+        sprintf(log_buffer[*buffer_count], "%3fs [Thread %d] Completed - request: %s %s (%3fs total)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
+        (*buffer_count)++;
+        // int nbytes = strlen(log_buf)*sizeof(char);
+        // if(DEBUG) printf(log_buf);
+        // pthread_mutex_lock(&log_lock);
+        // write(log_fd, log_buf, nbytes);
+        // pthread_mutex_unlock(&log_lock);    
+    }
 }
