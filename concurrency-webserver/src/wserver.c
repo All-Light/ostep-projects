@@ -276,16 +276,19 @@ int main(int argc, char* argv[]) {
 				peak_buf[bytes_peeked] = '\0';
 
 				sscanf(peak_buf, "%s %s", method, uri);
-				sprintf(log_buf, "%3fs [Thread Main] Arrived - request: %s %s\n", get_wall_seconds() - start_time, method, uri);
+				int result = snprintf(log_buf, MAXBUF, "%3fs [Thread Main] Arrived - request: %s %s\n", get_wall_seconds() - start_time, method, uri);
+				if(result < 0){
+					continue;
+				}
 				if(DEBUG) printf(log_buf);
-
 				int nbytes = strlen(log_buf)*sizeof(char);
+
 				pthread_mutex_lock(&log_lock);
 				write(main_log_file_d, log_buf, nbytes);
 				pthread_mutex_unlock(&log_lock);
 			}
 		}
-		int task_start_time = get_wall_seconds();
+		double task_start_time = get_wall_seconds();
 		QueueItem item; // fixme: Should be malloced?
 		item.connection_fd = conn_fd;
 		item.task_start_time = task_start_time; 
