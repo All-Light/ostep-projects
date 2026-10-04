@@ -25,9 +25,9 @@ static double get_wall_seconds() {
 
 typedef struct{
 	int tid;
-	int file_d; 
 	Queue** q;
 	double program_start_time;
+	char* filename; 
 } connection_data;
 
 
@@ -49,12 +49,24 @@ static void* worker(void* arg){
 	Queue* q = *data->q;
 	pid_t tid = data->tid; // debug
 	double program_start_time = data->program_start_time;
-	int file_d = data->file_d;
-	bool logging_enabled = file_d != -1;
-	const int buffer_size = 10;
-	char log_buffer[buffer_size][MAX_STR_LEN];
+
+	char* filename = data->filename;
+	int file_d = -1;
+	bool logging_enabled = filename != NULL;
+	if(logging_enabled){
+		file_d = open(filename, O_WRONLY | O_CREAT | O_APPEND, 0644);
+		if(file_d == -1){
+			// failed to open log file, kill
+			perror("Could not open log file");
+			exit(1);
+		} 
+	}
+
+	const unsigned int buffer_size = 10;
+	char log_buffer[buffer_size][MAX_STR_LEN]; 
 	unsigned int buffer_count = 0;
-	if(file_d == -1){
+
+	if(!logging_enabled){
 		// we wont write to log file
 		buffer_count = -1;
 	}
@@ -67,7 +79,7 @@ static void* worker(void* arg){
 			if(logging_enabled && buffer_count > 0){
 				// flush buffer to file
 				pthread_mutex_lock(&log_lock);
-				for(int i=0; i < buffer_count; i++){
+				for(unsigned int i=0; i < buffer_count; i++){
 					printf("wrote: %s", log_buffer[i]);
 					int nbytes = strlen(log_buffer[i])*sizeof(char);
 					write(file_d, log_buffer[i], nbytes);
@@ -101,7 +113,7 @@ static void* worker(void* arg){
 		if(logging_enabled && buffer_count + 2 > buffer_size){
 			// flush buffer to file
 			pthread_mutex_lock(&log_lock);
-			for(int i=0; i < buffer_count; i++){
+			for(unsigned int i=0; i < buffer_count; i++){
 				printf("wrote: %s", log_buffer[i]);
 				int nbytes = strlen(log_buffer[i])*sizeof(char);
 				write(file_d, log_buffer[i], nbytes);
@@ -112,7 +124,9 @@ static void* worker(void* arg){
 		}
 		// write to log file on condition
 	}
-
+	if(logging_enabled){
+		close(file_d);
+	}
 	return NULL;
 }
 
@@ -130,7 +144,7 @@ int main(int argc, char* argv[]) {
     int port = 10000;
 	size_t num_threads = 1;
 	size_t buffer = 1;
-	char log_file[50]; // magic numbers...
+	char log_file[MAXBUF]; // magic numbers...
 	bool logging_enabled = false;
 	struct stat path_stat;
     //char buf[MAXBUF],
@@ -163,7 +177,9 @@ int main(int argc, char* argv[]) {
 			if(stat(optarg, &path_stat) == 0){ // check that this file is accessible and exists
 				if(S_ISREG(path_stat.st_mode)){ // check that its a regular file (not a directory)
 					logging_enabled = true;
-					strcpy(log_file, optarg);
+					
+					strcpy(log_file, realpath(optarg, NULL));
+					printf("got logfile: %s\n", log_file);
 					break;
 				}
 				// its not a "file"
@@ -211,23 +227,20 @@ int main(int argc, char* argv[]) {
 	// create threads
 	pthread_t *threads = malloc((size_t)num_threads * sizeof(pthread_t));
 	if(threads == NULL){
-		perror("malloc");
+		perror("malloc failed");
 		exit(1);
 	}
 	double start_time = get_wall_seconds();
-	connection_data* thread_data = malloc(num_threads*sizeof(thread_data));
-    for (int i = 0; i < num_threads; i++) {
+	connection_data* thread_data = malloc(num_threads*sizeof(connection_data));
+    for (size_t i = 0; i < num_threads; i++) {
 		thread_data[i].q = &q;
 		thread_data[i].tid = i;
 		if(logging_enabled){
-			thread_data[i].file_d = open(log_file, O_WRONLY | O_CREAT | O_APPEND, 0644); // Instructions require each thread to open the log file themselves
-			if(thread_data[i].file_d == -1){
-				perror("Could not open the log file for thread.");
-				exit(1);
-			}
+			thread_data[i].filename = malloc((strlen(log_file)+1)*sizeof(char));
+			strcpy(thread_data[i].filename, log_file);
 		}
 		else{
-			thread_data[i].file_d = -1; // indicate that we have no file descriptor
+			thread_data[i].filename = NULL; // indicate that we have no file descriptor
 		}
 		thread_data[i].program_start_time = start_time;
         pthread_create(&threads[i], NULL, worker, (void*)&thread_data[i]);
@@ -287,8 +300,8 @@ int main(int argc, char* argv[]) {
 	pthread_mutex_destroy(&queue_lock);
 	destroyQueue(q);
 	close(main_log_file_d);
-	for (int i = 0; i < num_threads; i++) {
-		close(thread_data[i].file_d );
+	for (size_t i = 0; i < num_threads; i++) {
+		free(thread_data[i].filename);
 	}
 
 	free(thread_data);
