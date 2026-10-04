@@ -50,6 +50,7 @@ static void* worker(void* arg){
 	pid_t tid = data->tid; // debug
 	double program_start_time = data->program_start_time;
 	int file_d = data->file_d;
+	bool logging_enabled = file_d != -1;
 	const int buffer_size = 10;
 	char log_buffer[buffer_size][MAX_STR_LEN];
 	unsigned int buffer_count = 0;
@@ -63,7 +64,7 @@ static void* worker(void* arg){
 		pthread_mutex_lock(&queue_lock);
 		while(isEmpty(q)){
 			// we are going to sleep this thread, let it flush the log buffer before
-			if(buffer_count > 0){
+			if(logging_enabled && buffer_count > 0){
 				// flush buffer to file
 				pthread_mutex_lock(&log_lock);
 				for(int i=0; i < buffer_count; i++){
@@ -95,9 +96,9 @@ static void* worker(void* arg){
 		pthread_mutex_unlock(&queue_lock);
 		pthread_cond_signal(&queue_cond); // signal to other threads to wake and check the queue and for main thread to add new items
 
-		request_handle(conn_fd, buffer_size, log_buffer, &buffer_count, program_start_time, task_start_time, tid);
+		request_handle(conn_fd, buffer_size, log_buffer, &buffer_count, logging_enabled, program_start_time, task_start_time, tid);
 		close_or_die(conn_fd);
-		if(buffer_count + 2 > buffer_size){
+		if(logging_enabled && buffer_count + 2 > buffer_size){
 			// flush buffer to file
 			pthread_mutex_lock(&log_lock);
 			for(int i=0; i < buffer_count; i++){
@@ -218,7 +219,7 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < num_threads; i++) {
 		thread_data[i].q = &q;
 		thread_data[i].tid = i;
-		if(strlen(log_file) > 0){
+		if(logging_enabled){
 			thread_data[i].file_d = open(log_file, O_WRONLY | O_CREAT | O_APPEND, 0644); // Instructions require each thread to open the log file themselves
 			if(thread_data[i].file_d == -1){
 				perror("Could not open the log file for thread.");

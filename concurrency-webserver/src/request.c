@@ -156,7 +156,7 @@ void request_serve_static(int fd, char *filename, int filesize) {
 }
 
 // handle a request
-void request_handle(int fd, unsigned int buffer_size, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, double program_start_time, double task_start_time, int tid) {
+void request_handle(int fd, unsigned int buffer_size, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, bool logging_enabled, double program_start_time, double task_start_time, int tid) {
     int is_static;
     struct stat sbuf;
     char buf[MAXBUF], log_buf[MAXBUF], method[MAXBUF], uri[MAXBUF], version[MAXBUF];
@@ -165,7 +165,7 @@ void request_handle(int fd, unsigned int buffer_size, char log_buffer[][MAX_STR_
     readline_or_die(fd, buf, MAXBUF);
     sscanf(buf, "%s %s %s", method, uri, version);
     //printf("method:%s uri:%s version:%s\n", method, uri, version);
-    if(buffer_count != -1){
+    if(logging_enabled){
         sprintf(log_buffer[*buffer_count], "%3fs [Thread %d] Started - request: %s %s (%3fs waiting)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
         (*buffer_count)++;
         // int nbytes = strlen(log_buf)*sizeof(char);
@@ -201,7 +201,7 @@ void request_handle(int fd, unsigned int buffer_size, char log_buffer[][MAX_STR_
         }
         request_serve_dynamic(fd, filename, cgiargs);
     }
-    if(buffer_count != -1){
+    if(logging_enabled){
         sprintf(log_buffer[*buffer_count], "%3fs [Thread %d] Completed - request: %s %s (%3fs total)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
         (*buffer_count)++;
         // int nbytes = strlen(log_buf)*sizeof(char);

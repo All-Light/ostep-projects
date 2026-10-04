@@ -65,7 +65,7 @@ void client_print(int fd) {
 	n = readline_or_die(fd, buf, MAXBUF);
     }
 }
-
+// ./wclient localhost 8003 /index.html
 int main(int argc, char *argv[]) {
     char *host, *filename;
     int port;
