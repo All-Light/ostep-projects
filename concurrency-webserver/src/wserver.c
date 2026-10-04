@@ -110,7 +110,7 @@ static void* worker(void* arg){
 		pthread_cond_signal(&queue_producer_wake); // signal to main threads to wake 
 		pthread_cond_signal(&queue_consumer_wake); // signal to consumer thread to wake so we empty the queue
 
-		request_handle(conn_fd, buffer_size, log_buffer, &buffer_count, logging_enabled, program_start_time, task_start_time, tid);
+		request_handle(conn_fd, log_buffer, &buffer_count, logging_enabled, program_start_time, task_start_time, tid);
 		close_or_die(conn_fd);
 		if(logging_enabled && buffer_count + 2 > buffer_size){
 			// flush buffer to file
@@ -118,7 +118,7 @@ static void* worker(void* arg){
 			for(unsigned int i=0; i < buffer_count; i++){
 				printf("wrote: %s", log_buffer[i]);
 				int nbytes = strlen(log_buffer[i])*sizeof(char);
-				write(file_d, log_buffer[i], nbytes);
+				if(nbytes > 0) write(file_d, log_buffer[i], nbytes);
 			}
 			fsync(file_d); // force actual write to disk
 			pthread_mutex_unlock(&log_lock);

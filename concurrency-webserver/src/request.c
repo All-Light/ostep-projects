@@ -138,10 +138,10 @@ void request_serve_static(int fd, char *filename, int filesize) {
     // Rather than call read() to read the file into memory, 
     // which would require that we allocate a buffer, we memory-map the file
     srcp = mmap_or_die(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
-    close_or_die(srcfd);
+    close_or_die(srcfd); 
     
     // put together response
-    sprintf(buf, ""
+    snprintf(buf, MAXBUF, ""
 	    "HTTP/1.0 200 OK\r\n"
 	    "Server: OSTEP WebServer\r\n"
 	    "Content-Length: %d\r\n"
@@ -156,19 +156,23 @@ void request_serve_static(int fd, char *filename, int filesize) {
 }
 
 // handle a request
-void request_handle(int fd, unsigned int buffer_size, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, bool logging_enabled, double program_start_time, double task_start_time, int tid) {
+void request_handle(int fd, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, bool logging_enabled, double program_start_time, double task_start_time, int tid) {
     int is_static;
     struct stat sbuf;
-    char buf[MAXBUF], log_buf[MAXBUF], method[MAXBUF], uri[MAXBUF], version[MAXBUF];
+    char buf[MAXBUF], method[MAXBUF], uri[MAXBUF], version[MAXBUF];
     char filename[MAXBUF], cgiargs[MAXBUF];
     //printf("will read fd: %d\n",fd);
     readline_or_die(fd, buf, MAXBUF);
     sscanf(buf, "%s %s %s", method, uri, version);
     //printf("method:%s uri:%s version:%s\n", method, uri, version);
     if(logging_enabled){
-        sprintf(log_buffer[*buffer_count], "%3fs [Thread %d] Started - request: %s %s (%3fs waiting)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
+        int result = snprintf(log_buffer[*buffer_count], MAX_STR_LEN , "%3fs [Thread %d] Started - request: %s %s (%3fs waiting)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
         (*buffer_count)++;
-        // int nbytes = strlen(log_buf)*sizeof(char);
+        if(result > MAX_STR_LEN || result < 0){
+            request_error(fd, "", "400", "Bad Request", "destination url too long");
+            return;
+        }
+        // int nbytes = strlen(log_buf)*sizeof(char); 
         // if(DEBUG) printf(log_buf);
 
         // pthread_mutex_lock(&log_lock);
@@ -182,6 +186,10 @@ void request_handle(int fd, unsigned int buffer_size, char log_buffer[][MAX_STR_
     request_read_headers(fd);
     
     is_static = request_parse_uri(uri, filename, cgiargs);
+    if(strstr(filename, "..")){
+        request_error(fd, filename, "400", "Bad Request", "server could not handle this request");
+        return;
+    }
     if (stat(filename, &sbuf) < 0) {
         request_error(fd, filename, "404", "Not found", "server could not find this file");
         return;
@@ -202,7 +210,11 @@ void request_handle(int fd, unsigned int buffer_size, char log_buffer[][MAX_STR_
         request_serve_dynamic(fd, filename, cgiargs);
     }
     if(logging_enabled){
-        sprintf(log_buffer[*buffer_count], "%3fs [Thread %d] Completed - request: %s %s (%3fs total)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
+        int result = snprintf(log_buffer[*buffer_count], MAXBUF, "%3fs [Thread %d] Completed - request: %s %s (%3fs total)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
+        if(result < 0){
+            request_error(fd, filename, "400", "Bad Request", "destination url too long");
+            return;
+        }
         (*buffer_count)++;
         // int nbytes = strlen(log_buf)*sizeof(char);
         // if(DEBUG) printf(log_buf);
