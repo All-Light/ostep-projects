@@ -26,7 +26,7 @@ void destroyQueue(Queue *q){
 // move front to 0 and rear to queue length
 // FIXME: performance issue running this on every enqueue?
 static void resetQueue(Queue *q){
-    int nr_items = q->rear - q->front;
+    int nr_items = q->rear - q->front - 1;
     if(nr_items >= q->buffer_size){
         if(DEBUG) printf("queue is genuinely full\n");
         return; // queue is genuinely full
@@ -36,7 +36,7 @@ static void resetQueue(Queue *q){
     // shift entire array to start
     memmove(&q->items[0], &q->items[q->front+1], nr_items*sizeof(QueueItem));
     q->front = -1;
-    q->rear = nr_items-1;
+    q->rear = nr_items;
 }
 
 
