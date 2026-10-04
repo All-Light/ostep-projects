@@ -32,7 +32,8 @@ typedef struct{
 
 
 static pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t queue_producer_wake = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t queue_consumer_wake = PTHREAD_COND_INITIALIZER;
 
 static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -54,7 +55,7 @@ static void* worker(void* arg){
 	int file_d = -1;
 	bool logging_enabled = filename != NULL;
 	if(logging_enabled){
-		file_d = open(filename, O_WRONLY | O_CREAT | O_APPEND, 0644);
+		file_d = open(filename, O_WRONLY | O_APPEND, 0644);
 		if(file_d == -1){
 			// failed to open log file, kill
 			perror("Could not open log file");
@@ -88,7 +89,7 @@ static void* worker(void* arg){
 				pthread_mutex_unlock(&log_lock);
 				buffer_count = 0;
 			}
-			pthread_cond_wait(&queue_cond, &queue_lock);
+			pthread_cond_wait(&queue_consumer_wake, &queue_lock);
 		}
 		if(DEBUG) printf("Woke up as thread %d!\n", tid);
 		if(DEBUG) printQueue(q);
@@ -106,7 +107,8 @@ static void* worker(void* arg){
 		dequeue(q);
 		if(DEBUG) printf("thread received conn_fd %d\n", conn_fd);
 		pthread_mutex_unlock(&queue_lock);
-		pthread_cond_signal(&queue_cond); // signal to other threads to wake and check the queue and for main thread to add new items
+		pthread_cond_signal(&queue_producer_wake); // signal to main threads to wake 
+		pthread_cond_signal(&queue_consumer_wake); // signal to consumer thread to wake so we empty the queue
 
 		request_handle(conn_fd, buffer_size, log_buffer, &buffer_count, logging_enabled, program_start_time, task_start_time, tid);
 		close_or_die(conn_fd);
@@ -214,6 +216,7 @@ int main(int argc, char* argv[]) {
 			perror("Could not open the log file from main thread.");
 			exit(1);
 		}
+		strcpy(log_file, realpath(log_file, NULL)); // if we just created this file we need the absolute path for consumers  
 		char new_line[] = "\n";
 		pthread_mutex_lock(&log_lock);
 		write(main_log_file_d, new_line, strlen(new_line)*sizeof(char));
@@ -258,7 +261,7 @@ int main(int argc, char* argv[]) {
 		pthread_mutex_lock(&queue_lock);
 		while(isFull(q)){
 			//if(DEBUG) printf("main thread waiting...\n");
-			pthread_cond_wait(&queue_cond, &queue_lock);
+			pthread_cond_wait(&queue_producer_wake, &queue_lock);
 			//if(DEBUG) printf("main thread woke up\n");
 		}
 		// the queue is not full so we will listen for new connections
@@ -291,7 +294,7 @@ int main(int argc, char* argv[]) {
 		// enqueue this connection and wake threads
 		enqueue(q, &item);
 		pthread_mutex_unlock(&queue_lock);
-		pthread_cond_signal(&queue_cond);
+		pthread_cond_signal(&queue_consumer_wake); // wake a consumer
 		if(DEBUG) printf("main thread finished work\n");
 		//request_handle(conn_fd);
 		//close_or_die(conn_fd);
