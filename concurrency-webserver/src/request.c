@@ -54,14 +54,16 @@ void request_error(int fd, char *cause, char *errnum, char *shortmsg, char *long
 //
 // Reads and discards everything up to an empty text line
 //
-void request_read_headers(int fd) {
+int request_read_headers(int fd) {
     char buf[MAXBUF];
     
-    readline_or_die(fd, buf, MAXBUF);
+    int result = readline(fd, buf, MAXBUF);
+    if(result < 0) return 1; // fail to read
     while (strcmp(buf, "\r\n")) {
-	readline_or_die(fd, buf, MAXBUF);
+        result = readline(fd, buf, MAXBUF);
+        if(result <= 0) return 1; // fail to read or read 0 bytes
     }
-    return;
+    return 0;
 }
 
 //
@@ -160,55 +162,72 @@ void request_serve_static(int fd, char *filename, int filesize) {
 
 static void write_completion(int fd, char method[MAXBUF], char uri[MAXBUF], char filename[MAXBUF], char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, double program_start_time, double task_start_time, int tid) {
     int result = snprintf(log_buffer[*buffer_count], MAX_STR_LEN, "%3fs [Thread %d] Completed - request: %s %s (%3fs total)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
-    (*buffer_count)++;
-    if(result >= MAX_STR_LEN || result < 0){
-        request_error(fd, filename, "400", "Bad Request", "destination url too long");
+    if(result < 0){
+        perror("could not write completion to log file\n");
+    }else{
+        (*buffer_count)++;
     }
 }
 
 // handle a request
-void request_handle(int fd, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, bool logging_enabled, double program_start_time, double task_start_time, int tid) {
+int request_handle(int fd, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, bool logging_enabled, double program_start_time, double task_start_time, int tid) {
     int is_static;
     struct stat sbuf;
     char buf[MAXBUF], method[MAXBUF], uri[MAXBUF], version[MAXBUF];
     char filename[MAXBUF], cgiargs[MAXBUF];
     //printf("will read fd: %d\n",fd);
-    readline_or_die(fd, buf, MAXBUF);
+    int read_result = readline(fd, buf, MAXBUF);
+    if(read_result  < 0) return 1; // we cannot continue on a failed connection, just ignore it
     sscanf(buf, "%s %s %s", method, uri, version);
+
     //printf("method:%s uri:%s version:%s\n", method, uri, version);
     if(logging_enabled){
-        int result = snprintf(log_buffer[*buffer_count], MAX_STR_LEN , "%3fs [Thread %d] Started - request: %s %s (%3fs waiting)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
-        (*buffer_count)++;
-        // if(result >= MAX_STR_LEN || result < 0){
-        //     request_error(fd, "", "400", "Bad Request", "destination url too long");
-        //     if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
-        //     return;
-        // }
+        // the main thread didnt know connection info so we must log it from here
+        int result1 = snprintf(log_buffer[*buffer_count], MAX_STR_LEN , "%3fs [Thread Main] Arrived - request: %s %s \n", task_start_time - program_start_time, method, uri);
+        if(result1 < 0){
+            perror("could not write arrival to log file\n");
+        }
+        else{
+            (*buffer_count)++;
+        }
+        int result2 = snprintf(log_buffer[*buffer_count], MAX_STR_LEN , "%3fs [Thread %d] Started - request: %s %s (%3fs waiting)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
+        if(result2 < 0){
+            perror("could not write start to log file\n");
+        }
+        else{
+            (*buffer_count)++;
+        }
     }
     if (strcasecmp(method, "GET")) {
         request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
         if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
-        return;
+        return 1;
     }
-    request_read_headers(fd);
+    int valid_headers_flag = request_read_headers(fd);
+    if(valid_headers_flag != 0) {
+        if(logging_enabled){
+            write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
+        }
+        return 1;
+    }
     
     is_static = request_parse_uri(uri, filename, cgiargs);
     if(strstr(filename, "..")){
         request_error(fd, filename, "400", "Bad Request", "server could not handle this request");
         if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
-        return;
+        return 1;
     }
     if (stat(filename, &sbuf) < 0) {
         request_error(fd, filename, "404", "Not found", "server could not find this file");
         if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
-        return;
+        return 1;
     }
     
     if (is_static) {
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
             request_error(fd, filename, "403", "Forbidden", "server could not read this file");
             if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
-            return;
+            return 1;
         }
         request_serve_static(fd, filename, sbuf.st_size);
     } 
@@ -216,11 +235,12 @@ void request_handle(int fd, char log_buffer[][MAX_STR_LEN], unsigned int* buffer
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
             request_error(fd, filename, "403", "Forbidden", "server could not run this CGI program");
             if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
-            return;
+            return 1;
         }
         request_serve_dynamic(fd, filename, cgiargs);
     }
     if(logging_enabled){
         write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
     }
+    return 0;
 }

@@ -7,7 +7,7 @@
 #include "request.h"
 #include "io_helper.h"
 #include "queing.h"
-
+#include <time.h>
 
 #define MAXBUF (8192) // shouldnt duplicate...
 #define DEBUG 0
@@ -36,14 +36,6 @@ static pthread_cond_t queue_producer_wake = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t queue_consumer_wake = PTHREAD_COND_INITIALIZER;
 
 static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
-
-// void append_to_log(int file_d, char* value){
-// 	pthread_mutex_lock(&log_lock);
-// 	int nbytes = strlen(value)*sizeof(char);
-// 	write(file_d, value, nbytes);
-// 	pthread_mutex_unlock(&log_lock);
-// }
-
 
 static void* worker(void* arg){
 	connection_data* data = (connection_data*) arg;
@@ -85,7 +77,7 @@ static void* worker(void* arg){
 					int nbytes = strlen(log_buffer[i])*sizeof(char);
 					write(file_d, log_buffer[i], nbytes);
 				}
-				fsync(file_d); // force actual write to disk
+				//fsync(file_d); // force actual write to disk
 				pthread_mutex_unlock(&log_lock);
 				buffer_count = 0;
 			}
@@ -112,7 +104,9 @@ static void* worker(void* arg){
 
 		request_handle(conn_fd, log_buffer, &buffer_count, logging_enabled, program_start_time, task_start_time, tid);
 		close_or_die(conn_fd);
-		if(logging_enabled && buffer_count + 2 > buffer_size){
+
+
+		if(logging_enabled && buffer_count + 3 > buffer_size){
 			// flush buffer to file
 			pthread_mutex_lock(&log_lock);
 			for(unsigned int i=0; i < buffer_count; i++){
@@ -120,7 +114,7 @@ static void* worker(void* arg){
 				int nbytes = strlen(log_buffer[i])*sizeof(char);
 				if(nbytes > 0) write(file_d, log_buffer[i], nbytes);
 			}
-			fsync(file_d); // force actual write to disk
+			//fsync(file_d); // force actual write to disk
 			pthread_mutex_unlock(&log_lock);
 			buffer_count = 0;
 		}
@@ -150,10 +144,10 @@ int main(int argc, char* argv[]) {
 	bool logging_enabled = false;
 	struct stat path_stat;
     //char buf[MAXBUF],
-	char log_buf[MAXBUF];
+	//char log_buf[MAXBUF];
 
 
-    while ((c = getopt(argc, argv, "d:p:t:b:l:")) != -1){
+    while ((c = getopt(argc, argv, "d:p:t:b:s:l:")) != -1){
 		switch (c) {
 		case 'd':
 			root_dir = optarg;
@@ -181,7 +175,6 @@ int main(int argc, char* argv[]) {
 					logging_enabled = true;
 					
 					strcpy(log_file, realpath(optarg, NULL));
-					printf("got logfile: %s\n", log_file);
 					break;
 				}
 				// its not a "file"
@@ -196,6 +189,8 @@ int main(int argc, char* argv[]) {
 
 			fprintf(stderr, "Could not access log file.");
 			exit(1);
+			break;
+		case 's': // ignore s
 			break;
 		default:
 			fprintf(stderr, usage_str);
@@ -212,11 +207,14 @@ int main(int argc, char* argv[]) {
 	int main_log_file_d = -1;
 	if(logging_enabled){
 		main_log_file_d = open(log_file, O_WRONLY | O_CREAT | O_APPEND, 0644); // owner: read+write, group: read-only, others: read-only 
+		fsync(main_log_file_d); // Force this file to exist on disk if it was just created, we must be able to reference it in workers
 		if(main_log_file_d == -1){
 			perror("Could not open the log file from main thread.");
 			exit(1);
 		}
 		strcpy(log_file, realpath(log_file, NULL)); // if we just created this file we need the absolute path for consumers  
+
+		// just add a new line between ./wserver runs. cosmetic
 		char new_line[] = "\n";
 		pthread_mutex_lock(&log_lock);
 		write(main_log_file_d, new_line, strlen(new_line)*sizeof(char));
@@ -252,12 +250,11 @@ int main(int argc, char* argv[]) {
     // run out of this directory
     chdir_or_die(root_dir);
 	
+
     // now, get to work
     int listen_fd = open_listen_fd_or_die(port);
-	char method[MAXBUF], uri[MAXBUF], peak_buf[MAXBUF];//, version[MAXBUF];
+	//char method[MAXBUF], uri[MAXBUF], peak_buf[MAXBUF];//, version[MAXBUF];
     while (1) {
-		struct sockaddr_in client_addr;
-		int client_len = sizeof(client_addr);
 		pthread_mutex_lock(&queue_lock);
 		while(isFull(q)){
 			//if(DEBUG) printf("main thread waiting...\n");
@@ -266,32 +263,45 @@ int main(int argc, char* argv[]) {
 		}
 		// the queue is not full so we will listen for new connections
 
-		// unlock mutex so threads can work while we wait
-		pthread_mutex_unlock(&queue_lock);
+		pthread_mutex_unlock(&queue_lock); // unlock mutex so threads can work while we wait
+
+		struct sockaddr_in client_addr;
+		int client_len = sizeof(client_addr);
 		int conn_fd = accept_or_die(listen_fd, (sockaddr_t *) &client_addr, (socklen_t *) &client_len);
-		if(logging_enabled){
-			// we need to peek at method and URI to log it
-			ssize_t bytes_peeked = recv(conn_fd, peak_buf, sizeof(peak_buf)-1, MSG_PEEK);
-			if(bytes_peeked > 0){
-				peak_buf[bytes_peeked] = '\0';
+		// if(logging_enabled){
+		// 	// we need to peek at method and URI to log it
+		// 	ssize_t bytes_peeked = recv(conn_fd, peak_buf, sizeof(peak_buf)-1, MSG_PEEK);
+		// 	if(bytes_peeked > 0){
+		// 		peak_buf[bytes_peeked] = '\0';
 
-				sscanf(peak_buf, "%s %s", method, uri);
-				int result = snprintf(log_buf, MAXBUF, "%3fs [Thread Main] Arrived - request: %s %s\n", get_wall_seconds() - start_time, method, uri);
-				if(result < 0){
-					continue;
-				}
-				if(DEBUG) printf(log_buf);
-				int nbytes = strlen(log_buf)*sizeof(char);
+		// 		sscanf(peak_buf, "%s %s", method, uri);
+		// 		int result = snprintf(log_buf, MAXBUF, "%3fs [Thread Main] Arrived - request: %s %s\n", get_wall_seconds() - start_time, method, uri);
+		// 		if(result < 0){
+		// 			continue;
+		// 		}
+		// 		if(DEBUG) printf(log_buf);
+		// 		int nbytes = strlen(log_buf)*sizeof(char);
 
-				pthread_mutex_lock(&log_lock);
-				write(main_log_file_d, log_buf, nbytes);
-				pthread_mutex_unlock(&log_lock);
-			}
-		}
+		// 		pthread_mutex_lock(&log_lock);
+		// 		write(main_log_file_d, log_buf, nbytes);
+		// 		pthread_mutex_unlock(&log_lock);
+		// 	}
+		// }
 		double task_start_time = get_wall_seconds();
 		QueueItem item; // fixme: Should be malloced?
 		item.connection_fd = conn_fd;
 		item.task_start_time = task_start_time; 
+
+		struct timeval timeout = { // we need a timeout for the connection. 1 seconds to get request data should be enough
+			.tv_sec = 1,
+			.tv_usec = 0
+		};
+
+		if(setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO,&timeout, sizeof(timeout)) == -1){
+			perror("setsockopt");
+			close(conn_fd);
+			continue;
+		}
 
 		pthread_mutex_lock(&queue_lock);
 		// enqueue this connection and wake threads
@@ -315,8 +325,3 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-
-    
-
-
- 
