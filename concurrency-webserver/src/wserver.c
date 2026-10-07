@@ -12,6 +12,19 @@
 #define MAXBUF (8192) // shouldnt duplicate...
 #define DEBUG 0
 
+
+// ./wserver -d ./html/ -p 8003 -t 1 -b 10 -l logs.txt  and ./test-many-file-transfer.sh (access largest image 10 000 times)
+// Testing timing using local log buffer sizes:
+// - buffer_size = 3 (smallest):  36.465723s - 10.425121s = 26.040 602s total
+// - buffer_size = 6 : 27.549520s - 1.060912s = 26.488 608s total
+// - buffer_size = 10 :  28.174025s - 1.356052s = 26.817 973 s total
+// - buffer_size = 30 :  28.760949s - 1.105434s = 27.655 515 s total
+// - buffer_size = 50 :  28.150319s - 1.490364s = 26.659 955 s total
+// - buffer_size = 100 :  32.176482s - 3.273034s = 28.903 448 s total
+
+// the local buffer size doesnt really make a difference, seeing as we write before sleeping too we write quite a few smaller logs. The log size thus doesn't really matter in this implementation.
+// one of the hardest parts with this experiment is that running many local clients is time consuming and they each are completed within less than 0.0004 seconds.
+
 char default_root[] = ".";
 
 
@@ -55,7 +68,7 @@ static void* worker(void* arg){
 		} 
 	}
 
-	const unsigned int buffer_size = 10;
+	const unsigned int buffer_size = 100;
 	char log_buffer[buffer_size][MAX_STR_LEN]; 
 	unsigned int buffer_count = 0;
 
@@ -73,6 +86,7 @@ static void* worker(void* arg){
 				// flush buffer to file
 				pthread_mutex_lock(&log_lock);
 				for(unsigned int i=0; i < buffer_count; i++){
+					//printf("wrote %d lines\n", buffer_count);
 					if(DEBUG) printf("wrote: %s", log_buffer[i]);
 					int nbytes = strlen(log_buffer[i])*sizeof(char);
 					write(file_d, log_buffer[i], nbytes);
@@ -110,6 +124,7 @@ static void* worker(void* arg){
 			// flush buffer to file
 			pthread_mutex_lock(&log_lock);
 			for(unsigned int i=0; i < buffer_count; i++){
+				//printf("wrote %d lines\n", buffer_count);
 				if(DEBUG) printf("wrote: %s", log_buffer[i]); 
 				int nbytes = strlen(log_buffer[i])*sizeof(char);
 				if(nbytes > 0) write(file_d, log_buffer[i], nbytes);
