@@ -25,6 +25,13 @@
 // the local buffer size doesnt really make a difference, seeing as we write before sleeping too we write quite a few smaller logs. The log size thus doesn't really matter in this implementation.
 // one of the hardest parts with this experiment is that running many local clients is time consuming and they each are completed within less than 0.0004 seconds.
 
+// with no preemptive writes. Still to noisy to clearly distinguish which is faster.
+// buffer_size = 50: 29.554150s - 0.688923s = 28.865 227 s
+// buffer_size = 100: 30.609156s− 4.586780s = 26.022 376 s
+
+// The most reasonable explanation is that writing to disk (without force-write fsync) requires only a few instructions before being left to the DMA and storage device.
+//  The actual write-to-disk happens not necessarily immediately but could be buffered by the OS and/or storage device
+
 char default_root[] = ".";
 
 
@@ -68,7 +75,7 @@ static void* worker(void* arg){
 		} 
 	}
 
-	const unsigned int buffer_size = 100;
+	const unsigned int buffer_size = 50;
 	char log_buffer[buffer_size][MAX_STR_LEN]; 
 	unsigned int buffer_count = 0;
 
@@ -82,19 +89,19 @@ static void* worker(void* arg){
 		pthread_mutex_lock(&queue_lock);
 		while(isEmpty(q)){
 			// we are going to sleep this thread, let it flush the log buffer before
-			if(logging_enabled && buffer_count > 0){
-				// flush buffer to file
-				pthread_mutex_lock(&log_lock);
-				for(unsigned int i=0; i < buffer_count; i++){
-					//printf("wrote %d lines\n", buffer_count);
-					if(DEBUG) printf("wrote: %s", log_buffer[i]);
-					int nbytes = strlen(log_buffer[i])*sizeof(char);
-					write(file_d, log_buffer[i], nbytes);
-				}
-				//fsync(file_d); // force actual write to disk
-				pthread_mutex_unlock(&log_lock);
-				buffer_count = 0;
-			}
+			// if(logging_enabled && buffer_count > 0){
+			// 	// flush buffer to file
+			// 	pthread_mutex_lock(&log_lock);
+			// 	for(unsigned int i=0; i < buffer_count; i++){
+			// 		//printf("wrote %d lines\n", buffer_count);
+			// 		if(DEBUG) printf("wrote: %s", log_buffer[i]);
+			// 		int nbytes = strlen(log_buffer[i])*sizeof(char);
+			// 		write(file_d, log_buffer[i], nbytes);
+			// 	}
+			// 	//fsync(file_d); // force actual write to disk
+			// 	pthread_mutex_unlock(&log_lock);
+			// 	buffer_count = 0;
+			// }
 			pthread_cond_wait(&queue_consumer_wake, &queue_lock);
 		}
 		if(DEBUG) printf("Woke up as thread %d!\n", tid);
