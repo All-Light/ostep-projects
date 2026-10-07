@@ -73,7 +73,7 @@ static void* worker(void* arg){
 				// flush buffer to file
 				pthread_mutex_lock(&log_lock);
 				for(unsigned int i=0; i < buffer_count; i++){
-					printf("wrote: %s", log_buffer[i]);
+					if(DEBUG) printf("wrote: %s", log_buffer[i]);
 					int nbytes = strlen(log_buffer[i])*sizeof(char);
 					write(file_d, log_buffer[i], nbytes);
 				}
@@ -110,10 +110,10 @@ static void* worker(void* arg){
 			// flush buffer to file
 			pthread_mutex_lock(&log_lock);
 			for(unsigned int i=0; i < buffer_count; i++){
-				printf("wrote: %s", log_buffer[i]);
+				if(DEBUG) printf("wrote: %s", log_buffer[i]); 
 				int nbytes = strlen(log_buffer[i])*sizeof(char);
 				if(nbytes > 0) write(file_d, log_buffer[i], nbytes);
-			}
+			} 
 			//fsync(file_d); // force actual write to disk
 			pthread_mutex_unlock(&log_lock);
 			buffer_count = 0;
