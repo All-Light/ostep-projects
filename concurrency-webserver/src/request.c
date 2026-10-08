@@ -130,6 +130,23 @@ void request_serve_dynamic(int fd, char *filename, char *cgiargs) {
     }
 }
 
+static int write_all(int fd, const void* buffer, size_t length){
+    const char* ptr = buffer;
+    while(length>0){
+        ssize_t n = write(fd, ptr, length);
+        if(n<0 && errno == EINTR){
+            continue; // intterrupt
+        }
+        if(n<=0){
+            return -1; // failed
+        }
+        ptr+=n; // continue writing until all is written
+        length -= (size_t)n;
+    }
+    return 0;
+}
+
+
 void request_serve_static(int fd, char *filename, int filesize) {
     int srcfd;
     char *srcp, filetype[MAXBUF], buf[MAXBUF];
@@ -151,16 +168,16 @@ void request_serve_static(int fd, char *filename, int filesize) {
 	    "Content-Type: %s\r\n\r\n", 
 	    filesize, filetype);
     
-    write_or_die(fd, buf, strlen(buf));
+    write_all(fd, buf, strlen(buf));
     
     if(filesize>0){
         //  Writes out to the client socket the memory-mapped file 
-        write_or_die(fd, srcp, filesize);
+        write_all(fd, srcp, filesize);
         munmap_or_die(srcp, filesize);
     }
 }
 
-static void write_completion(int fd, char method[MAXBUF], char uri[MAXBUF], char filename[MAXBUF], char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, double program_start_time, double task_start_time, int tid) {
+static void write_completion(char method[MAXBUF], char uri[MAXBUF], char log_buffer[][MAX_STR_LEN], unsigned int* buffer_count, double program_start_time, double task_start_time, int tid) {
     int result = snprintf(log_buffer[*buffer_count], MAX_STR_LEN, "%3fs [Thread %d] Completed - request: %s %s (%3fs total)\n", get_wall_seconds() - program_start_time, tid, method, uri, get_wall_seconds() - task_start_time);
     if(result < 0){
         perror("could not write completion to log file\n");
@@ -200,13 +217,13 @@ int request_handle(int fd, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_
     }
     if (strcasecmp(method, "GET")) {
         request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
-        if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
+        if(logging_enabled) write_completion(method, uri, log_buffer, buffer_count, program_start_time, task_start_time, tid);
         return 1;
     }
     int valid_headers_flag = request_read_headers(fd);
     if(valid_headers_flag != 0) {
         if(logging_enabled){
-            write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
+            write_completion(method, uri, log_buffer, buffer_count, program_start_time, task_start_time, tid);
         }
         return 1;
     }
@@ -214,19 +231,19 @@ int request_handle(int fd, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_
     is_static = request_parse_uri(uri, filename, cgiargs);
     if(strstr(filename, "..")){
         request_error(fd, filename, "400", "Bad Request", "server could not handle this request");
-        if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
+        if(logging_enabled) write_completion(method, uri, log_buffer, buffer_count, program_start_time, task_start_time, tid);
         return 1;
     }
     if (stat(filename, &sbuf) < 0) {
         request_error(fd, filename, "404", "Not found", "server could not find this file");
-        if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
+        if(logging_enabled) write_completion(method, uri, log_buffer, buffer_count, program_start_time, task_start_time, tid);
         return 1;
     }
     
     if (is_static) {
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
             request_error(fd, filename, "403", "Forbidden", "server could not read this file");
-            if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
+            if(logging_enabled) write_completion(method, uri, log_buffer, buffer_count, program_start_time, task_start_time, tid);
             return 1;
         }
         request_serve_static(fd, filename, sbuf.st_size);
@@ -234,13 +251,13 @@ int request_handle(int fd, char log_buffer[][MAX_STR_LEN], unsigned int* buffer_
     else {
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
             request_error(fd, filename, "403", "Forbidden", "server could not run this CGI program");
-            if(logging_enabled) write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
+            if(logging_enabled) write_completion(method, uri, log_buffer, buffer_count, program_start_time, task_start_time, tid);
             return 1;
         }
         request_serve_dynamic(fd, filename, cgiargs);
     }
     if(logging_enabled){
-        write_completion(fd, method, uri, filename, log_buffer, buffer_count, program_start_time, task_start_time, tid);
+        write_completion(method, uri, log_buffer, buffer_count, program_start_time, task_start_time, tid);
     }
     return 0;
 }
