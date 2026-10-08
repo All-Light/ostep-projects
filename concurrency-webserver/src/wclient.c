@@ -98,6 +98,13 @@ void* worker(void* arg){
 
 // ./wclient localhost 8003 /images/image5.jpg /cgi/spin?1 /images/image4.jpg
 // ./wclient localhost 8003 /index.html
+
+// cgi tests:
+// time ./wclient localhost 8003 /cgi/spin?3 /cgi/spin?3 /cgi/spin?3 /cgi/spin?3 > /dev/null 
+//      -> 12 seconds on 1 server threads
+//      -> 6 seconds on 2 server threads
+//      -> 6 seconds on 3 server threads
+//      -> 3 seconds on 6 server threads
 int main(int argc, char *argv[]) {
     char *host;
     int port;
