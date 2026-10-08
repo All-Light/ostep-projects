@@ -35,6 +35,14 @@
 char default_root[] = ".";
 
 
+// Runtime for different QUEUE buffers (3 worker threads + logging) 1000 image requests:
+// b = 1: 2.200451s - 0.053912s = 2.146 539 s
+// b = 2: 2.548908s - 0.051531s = 2.497 377 s
+// b = 5: 2.290716s - 0.050954s = 2.239 762 s
+// b = 10: 2.427006s - 0.059242s = 2.367 764 s
+// b = 50: 2.762957s  - 0.055215s = 2.707 742 s or 2.597068s - 0.054644s = 2.542 424 s 
+// ==> NOISE IS TOO HIGH TO MAKE OUT ANY DIFFERENCE!!!
+
 static double get_wall_seconds() {
   struct timeval tv;
   gettimeofday(&tv, NULL);
@@ -75,7 +83,7 @@ static void* worker(void* arg){
 		} 
 	}
 
-	const unsigned int buffer_size = 50;
+	const unsigned int buffer_size = 9;
 	char log_buffer[buffer_size][MAX_STR_LEN]; 
 	unsigned int buffer_count = 0;
 
@@ -89,19 +97,19 @@ static void* worker(void* arg){
 		pthread_mutex_lock(&queue_lock);
 		while(isEmpty(q)){
 			// we are going to sleep this thread, let it flush the log buffer before
-			// if(logging_enabled && buffer_count > 0){
-			// 	// flush buffer to file
-			// 	pthread_mutex_lock(&log_lock);
-			// 	for(unsigned int i=0; i < buffer_count; i++){
-			// 		//printf("wrote %d lines\n", buffer_count);
-			// 		if(DEBUG) printf("wrote: %s", log_buffer[i]);
-			// 		int nbytes = strlen(log_buffer[i])*sizeof(char);
-			// 		write(file_d, log_buffer[i], nbytes);
-			// 	}
-			// 	//fsync(file_d); // force actual write to disk
-			// 	pthread_mutex_unlock(&log_lock);
-			// 	buffer_count = 0;
-			// }
+			if(logging_enabled && buffer_count > 0){
+				// flush buffer to file
+				pthread_mutex_lock(&log_lock);
+				for(unsigned int i=0; i < buffer_count; i++){
+					//printf("wrote %d lines\n", buffer_count);
+					if(DEBUG) printf("wrote: %s", log_buffer[i]);
+					int nbytes = strlen(log_buffer[i])*sizeof(char);
+					write(file_d, log_buffer[i], (size_t) nbytes);
+				}
+				//fsync(file_d); // force actual write to disk
+				pthread_mutex_unlock(&log_lock);
+				buffer_count = 0;
+			}
 			pthread_cond_wait(&queue_consumer_wake, &queue_lock);
 		}
 		if(DEBUG) printf("Woke up as thread %d!\n", tid);
@@ -134,7 +142,7 @@ static void* worker(void* arg){
 				//printf("wrote %d lines\n", buffer_count);
 				if(DEBUG) printf("wrote: %s", log_buffer[i]); 
 				int nbytes = strlen(log_buffer[i])*sizeof(char);
-				if(nbytes > 0) write(file_d, log_buffer[i], nbytes);
+				if(nbytes > 0) write(file_d, log_buffer[i], (size_t) nbytes);
 			} 
 			//fsync(file_d); // force actual write to disk
 			pthread_mutex_unlock(&log_lock);
