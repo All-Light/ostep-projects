@@ -20,6 +20,7 @@
 //
 
 #include "io_helper.h"
+#include <pthread.h>
 
 #define MAXBUF (8192)
 
@@ -32,9 +33,13 @@ void client_send(int fd, char *filename) {
     
     gethostname_or_die(hostname, MAXBUF);
     
-    /* Form and send the HTTP request */
-    sprintf(buf, "GET %s HTTP/1.1\n", filename);
-    sprintf(buf, "%shost: %s\n\r\n", buf, hostname);
+    /* Build the request without reading and writing the same buffer at once. */
+    int len = snprintf(buf, sizeof(buf), "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n",
+                       filename, hostname);
+    if (len < 0 || (size_t)len >= sizeof(buf)) {
+        fprintf(stderr, "Request is too long for %s\n", filename);
+        return;
+    }
     write_or_die(fd, buf, strlen(buf));
 }
 
@@ -58,35 +63,77 @@ void client_print(int fd) {
 	//}
     }
     
-    // Read and display the HTTP Body 
-    n = readline_or_die(fd, buf, MAXBUF);
-    while (n > 0) {
-	printf("%s", buf);
-	n = readline_or_die(fd, buf, MAXBUF);
+    // Read and display the body as bytes; images may contain zero bytes and
+    // need not contain newline characters.
+    ssize_t bytes_read;
+    while ((bytes_read = read(fd, buf, sizeof(buf))) > 0) {
+        if (fwrite(buf, 1, (size_t)bytes_read, stdout) != (size_t)bytes_read) {
+            perror("fwrite");
+            break;
+        }
+    }
+    if (bytes_read < 0) {
+        perror("read");
     }
 }
+
+typedef struct{
+    int port;
+    char host[MAXBUF];
+    char filename[MAXBUF];
+} worker_data;
+
+void* worker(void* arg){
+    worker_data* data = (worker_data*) arg;
+
+    int clientfd = open_client_fd_or_die(data->host, data->port);
+    
+    client_send(clientfd, data->filename);
+    client_print(clientfd);
+    
+    close_or_die(clientfd);
+    return NULL;
+}
+
+
+// ./wclient localhost 8003 /images/image5.jpg /cgi/spin?1 /images/image4.jpg
 // ./wclient localhost 8003 /index.html
 int main(int argc, char *argv[]) {
-    char *host, *filename;
+    char *host;
     int port;
-    int clientfd;
-    
-    if (argc != 4) {
-	fprintf(stderr, "Usage: %s <host> <port> <filename>\n", argv[0]);
-	exit(1);
+    int nr_threads;
+    if (argc < 4) {
+        fprintf(stderr, "Usage: %s <host> <port> <filename>\n", argv[0]);
+        exit(1);
     }
     
     host = argv[1];
     port = atoi(argv[2]);
-    filename = argv[3];
+    //filename = argv[3];
+    nr_threads = argc-3;
+    pthread_t threads[nr_threads]; // nr of filenames
+    worker_data** threads_data = calloc(nr_threads, sizeof(*threads_data));
+    for(int i = 0; i < nr_threads; i++){
+        worker_data* data = malloc(sizeof(worker_data));
+
+        if(data == NULL){
+            printf("Could not create thread data");
+            return 1;
+        }
+        strncpy(data->host, host, MAXBUF-1);
+        data->host[sizeof(data->host)-1] = '\0';
+        strncpy(data->filename, argv[3+i], MAXBUF-1);
+        data->filename[sizeof(data->filename)-1] = '\0';
+        data->port = port;
+        threads_data[i] = data;
+        pthread_create(&threads[i], NULL, worker, (void*)data);
+    }
     
-    /* Open a single connection to the specified host and port */
-    clientfd = open_client_fd_or_die(host, port);
-    
-    client_send(clientfd, filename);
-    client_print(clientfd);
-    
-    close_or_die(clientfd);
-    
+    for(int i = 0; i < nr_threads; i++){
+        pthread_join(threads[i], NULL);
+        free(threads_data[i]);
+    }
+
+    free(threads_data);
     exit(0);
 }
